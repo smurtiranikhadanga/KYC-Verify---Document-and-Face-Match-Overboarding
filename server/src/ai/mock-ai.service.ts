@@ -35,7 +35,7 @@ export class MockAIService implements IAIService {
     validation: DocumentValidationResult;
     tamper: TamperResult;
   }> {
-    const quality = this.docValidationService.evaluateQuality(documentFrontBuffer, caseId);
+    const quality = await this.docValidationService.evaluateQuality(documentFrontBuffer, caseId);
     const ocr = await this.ocrService.extractFields(
       documentFrontBuffer,
       documentBackBuffer,
