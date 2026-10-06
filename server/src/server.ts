@@ -58,6 +58,17 @@ app.use(
 // FIX AUTH-04: cookie-parser is required for req.cookies to work
 app.use(cookieParser());
 
+// CSRF Protection: require a custom header on state-changing requests
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+    if (req.headers['x-requested-with'] !== 'XMLHttpRequest') {
+      res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'CSRF token missing or invalid (missing X-Requested-With)' } });
+      return;
+    }
+  }
+  next();
+});
+
 // 3. Rate limiting (stricter for auth endpoints)
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,

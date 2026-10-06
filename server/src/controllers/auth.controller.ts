@@ -90,15 +90,26 @@ export async function requestOtp(req: Request, res: Response): Promise<void> {
   }
 
   const { contactType, contactValue } = parsed.data;
+  const contactNormal = contactValue.toLowerCase().trim();
 
-  // FIX AUTH-01: Generate a real random 6-digit OTP, not hardcoded '123456'
-  const otpCode = crypto.randomInt(100000, 999999).toString();
+  // FIX N-13c: Per-contact rate limit (prevent inbox spam across multiple IPs)
+  const recentRequests = await VerificationSession.countDocuments({
+    contactValue: contactNormal,
+    createdAt: { $gte: new Date(Date.now() - 15 * 60 * 1000) }
+  });
+  if (recentRequests >= 5) {
+    res.status(429).json({ success: false, error: { code: 'TOO_MANY_REQUESTS', message: 'Too many requests for this contact. Try again in 15 minutes.' } });
+    return;
+  }
+
+  // FIX AUTH-01 & N-13c: Generate a real random 6-digit OTP, properly padded
+  const otpCode = crypto.randomInt(0, 1000000).toString().padStart(6, '0');
   const sessionId = `sess_${crypto.randomBytes(16).toString('hex')}`;
 
   await VerificationSession.create({
     sessionId,
     contactType,
-    contactValue: contactValue.toLowerCase(),
+    contactValue: contactNormal,
     otpCode,
     attempts: 0,
     expiresAt: new Date(Date.now() + OTP_EXPIRY_MS),
@@ -151,7 +162,13 @@ export async function verifyOtp(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  if (session.otpCode !== otpCode) {
+  // FIX N-13c: Use constant-time comparison to prevent timing attacks
+  const isValid = crypto.timingSafeEqual(
+    Buffer.from(session.otpCode.padStart(6, '0')),
+    Buffer.from(otpCode.padStart(6, '0'))
+  );
+
+  if (!isValid) {
     session.attempts += 1;
     await session.save();
     const remaining = OTP_MAX_ATTEMPTS - session.attempts;
