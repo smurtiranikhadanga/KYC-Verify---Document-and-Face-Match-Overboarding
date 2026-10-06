@@ -16,7 +16,7 @@ export interface VerificationState {
   backPreview: string;
   selfieFile: File | null;
   selfiePreview: string;
-  activeChallenge: 'none' | 'turn_left' | 'turn_right' | 'blink';
+  activeChallenge: 'none' | 'turn_left' | 'turn_right' | 'blink' | 'nod';
   qualityFeedback: {
     resolution?: string;
     brightness?: string;

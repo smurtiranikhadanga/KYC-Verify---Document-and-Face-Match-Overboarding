@@ -71,16 +71,9 @@ export class DecisionService {
       riskScore += 40;
     }
 
-    // Hard reject: expired or invalid MRZ/date can never auto-approve
-    if (validation.expired || !validation.formatOk || !validation.crossFieldOk) {
-      return {
-        outcome: validation.expired ? 'AUTO_REJECTED' : 'MANUAL_REVIEW',
-        reasonCodes,
-        priority: 95,
-        riskScore: Math.min(100, riskScore),
-        riskFlags,
-      };
-    }
+    // FIX N-10: Removed early exit here to allow collection of all fraud signals (PIPE-16).
+    // Instead of early return, we just accrue the reasonCodes and riskScore which will
+    // lead to AUTO_REJECTED or MANUAL_REVIEW in the final synthesis.
 
     // ── 2. Image Quality ─────────────────────────────────────────────────────
     if (!quality.passed || quality.score < 0.70) {
@@ -102,7 +95,14 @@ export class DecisionService {
       riskScore += 25;
     }
 
-    // ── FIX PIPE-08: Minimum Age Check ───────────────────────────────────────
+    // ── FIX N-09: OCR Data Missing & Minimum Age Check ───────────────────────
+    // Reject if critical fields are completely empty (prevent fail-open)
+    if (!ocr.fields.fullName?.value || !ocr.fields.idNumber?.value || !ocr.fields.dob?.value) {
+      reasonCodes.push('OCR_MISSING_DATA');
+      riskFlags.push('MISSING_CRITICAL_DATA');
+      riskScore += 40;
+    }
+
     const minAge = policy.minimumAgeYears ?? 18;
     if (ocr.fields.dob?.value) {
       const dob = new Date(ocr.fields.dob.value);
@@ -119,6 +119,11 @@ export class DecisionService {
         riskFlags.push('INVALID_DATE_OF_BIRTH');
         riskScore += 20;
       }
+    } else {
+      // DOB is missing entirely
+      reasonCodes.push('DOB_MISSING');
+      riskFlags.push('INVALID_DATE_OF_BIRTH');
+      riskScore += 20;
     }
 
     // ── 4. Tamper ────────────────────────────────────────────────────────────

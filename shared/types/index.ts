@@ -4,6 +4,7 @@ export type CaseState =
   | 'CREATED'
   | 'CONSENTED'
   | 'DOCS_UPLOADED'
+  | 'SELFIE_UPLOADED'
   | 'QUEUED'
   | 'PROCESSING'
   | 'AUTO_APPROVED'

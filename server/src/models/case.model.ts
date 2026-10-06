@@ -118,6 +118,7 @@ const KycCaseSchema = new Schema<IKycCase>(
         'CREATED',
         'CONSENTED',
         'DOCS_UPLOADED',
+        'SELFIE_UPLOADED',
         'QUEUED',
         'PROCESSING',
         'AUTO_APPROVED',

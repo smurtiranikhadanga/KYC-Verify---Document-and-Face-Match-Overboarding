@@ -188,6 +188,11 @@ export async function uploadDocuments(req: AuthRequest, res: Response): Promise<
     res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Case not found' } });
     return;
   }
+  
+  if (!SUBMITTABLE_STATES.has(kycCase.state as string) && kycCase.state !== 'NEEDS_RESUBMISSION') {
+    res.status(400).json({ success: false, error: { code: 'INVALID_STATE', message: `Cannot upload documents in state '${kycCase.state}'` } });
+    return;
+  }
 
   // FIX AUTH-03: Ownership check
   if (req.role === 'applicant' && req.applicant) {
@@ -204,6 +209,16 @@ export async function uploadDocuments(req: AuthRequest, res: Response): Promise<
   if (!isValidImageBuffer(frontFile.buffer, frontFile.mimetype)) {
     res.status(400).json({ success: false, error: { code: 'INVALID_FILE', message: 'File content does not match declared type' } });
     return;
+  }
+
+  // FIX N-04: Validate back file BEFORE modifying anything
+  let backFile: Express.Multer.File | undefined;
+  if (files.back && files.back.length > 0) {
+    backFile = files.back[0];
+    if (!isValidImageBuffer(backFile.buffer, backFile.mimetype)) {
+      res.status(400).json({ success: false, error: { code: 'INVALID_FILE', message: 'Back file content does not match declared type' } });
+      return;
+    }
   }
 
   // FIX PIPE-10: Remove stale front artifacts before creating new ones
@@ -230,13 +245,7 @@ export async function uploadDocuments(req: AuthRequest, res: Response): Promise<
   kycCase.document.artifactIds = [frontArtifact._id as any];
   kycCase.document.frontImageUrl = frontStored.url;
 
-  if (files.back && files.back.length > 0) {
-    const backFile = files.back[0];
-    if (!isValidImageBuffer(backFile.buffer, backFile.mimetype)) {
-      res.status(400).json({ success: false, error: { code: 'INVALID_FILE', message: 'Back file content does not match declared type' } });
-      return;
-    }
-
+  if (backFile) {
     // FIX PIPE-10: Remove stale back artifacts
     const existingBack = await Artifact.find({ caseId: id, kind: 'id_back' });
     for (const stale of existingBack) {
@@ -304,6 +313,11 @@ export async function uploadSelfie(req: AuthRequest, res: Response): Promise<voi
   const kycCase = await KycCase.findOne({ caseId: id });
   if (!kycCase) {
     res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Case not found' } });
+    return;
+  }
+  
+  if (!SUBMITTABLE_STATES.has(kycCase.state as string) && kycCase.state !== 'NEEDS_RESUBMISSION') {
+    res.status(400).json({ success: false, error: { code: 'INVALID_STATE', message: `Cannot upload selfie in state '${kycCase.state}'` } });
     return;
   }
 
@@ -397,11 +411,11 @@ export async function submitCase(req: AuthRequest, res: Response): Promise<void>
     }
   }
 
-  // FIX PIPE-11: Block terminal states from being re-queued
-  if (TERMINAL_STATES.has(kycCase.state as string)) {
+  // FIX N-04: Block non-submittable states
+  if (!SUBMITTABLE_STATES.has(kycCase.state as string)) {
     res.status(400).json({
       success: false,
-      error: { code: 'INVALID_STATE', message: `Case is in terminal state '${kycCase.state}' and cannot be submitted` },
+      error: { code: 'INVALID_STATE', message: `Case is in state '${kycCase.state}' and cannot be submitted` },
     });
     return;
   }
@@ -446,15 +460,28 @@ export async function submitCase(req: AuthRequest, res: Response): Promise<void>
   }
 
   // Update state to QUEUED
-  kycCase.state = 'QUEUED';
-  (kycCase as any).submissionCount = submissionCount + 1;
-  kycCase.stateHistory.push({
-    state: 'QUEUED',
-    at: new Date(),
-    by: req.applicant?._id?.toString() || 'applicant',
-    notes: `Submitted for verification (attempt ${submissionCount + 1})`,
-  });
-  await kycCase.save();
+  // N-04: Atomic update to prevent races
+  const updated = await KycCase.findOneAndUpdate(
+    { _id: kycCase._id, state: kycCase.state, submissionCount: submissionCount },
+    { 
+      $set: { state: 'QUEUED' },
+      $inc: { submissionCount: 1 },
+      $push: { 
+        stateHistory: {
+          state: 'QUEUED',
+          at: new Date(),
+          by: req.applicant?._id?.toString() || 'applicant',
+          notes: `Submitted for verification (attempt ${submissionCount + 1})`,
+        }
+      }
+    },
+    { new: true }
+  );
+
+  if (!updated) {
+    res.status(409).json({ success: false, error: { code: 'CONFLICT', message: 'Case was modified concurrently. Please try again.' } });
+    return;
+  }
 
   const jobQueue = getJobQueue();
   await jobQueue.enqueueCaseProcessing({

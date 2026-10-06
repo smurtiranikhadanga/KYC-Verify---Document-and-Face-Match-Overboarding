@@ -1,5 +1,17 @@
 import express, { Request, Response, NextFunction } from 'express';
+import 'express-async-errors'; // FIX N-02: Async error handling
 import cors from 'cors';
+
+// FIX N-02: Process-level error handling for supervised restarts
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[FATAL] Unhandled Rejection at:', promise, 'reason:', reason);
+  process.exit(1);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('[FATAL] Uncaught Exception:', error);
+  process.exit(1);
+});
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import cookieParser from 'cookie-parser';
