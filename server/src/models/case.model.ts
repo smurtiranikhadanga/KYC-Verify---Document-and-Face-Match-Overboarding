@@ -95,6 +95,7 @@ export interface IKycCase extends Document {
   };
   assignedTo?: mongoose.Types.ObjectId;
   slaDueAt?: Date;
+  submissionCount: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -225,6 +226,7 @@ const KycCaseSchema = new Schema<IKycCase>(
     },
     assignedTo: { type: Schema.Types.ObjectId, ref: 'User' },
     slaDueAt: { type: Date },
+    submissionCount: { type: Number, default: 0 },
   },
   { timestamps: true }
 );

@@ -14,6 +14,7 @@ import {
   Loader2,
   AlertTriangle,
   ZapIcon,
+  Sparkles,
 } from 'lucide-react';
 import { useVerification } from '../../context/VerificationContext';
 import { caseService } from '../../services/case.service';
@@ -198,6 +199,48 @@ export const VerifySelfiePage: React.FC = () => {
     if (mode === 'CAMERA') startCamera();
   };
 
+  const handleUseDemoSelfie = () => {
+    stopCamera();
+    const canvas = document.createElement('canvas');
+    canvas.width = 480;
+    canvas.height = 480;
+    const ctx = canvas.getContext('2d')!;
+
+    ctx.fillStyle = '#f8fafc';
+    ctx.fillRect(0, 0, 480, 480);
+
+    ctx.fillStyle = '#1e293b';
+    ctx.beginPath();
+    ctx.arc(240, 520, 200, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#e2b396';
+    ctx.fillRect(205, 300, 70, 70);
+
+    ctx.beginPath();
+    ctx.ellipse(240, 220, 95, 125, 0, 0, Math.PI * 2);
+    ctx.fillStyle = '#fed7aa';
+    ctx.fill();
+
+    ctx.fillStyle = '#1e293b';
+    ctx.beginPath();
+    ctx.ellipse(200, 200, 10, 6, 0, 0, Math.PI * 2);
+    ctx.ellipse(280, 200, 10, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(240, 260, 28, 0.2 * Math.PI, 0.8 * Math.PI);
+    ctx.strokeStyle = '#c2410c';
+    ctx.lineWidth = 4;
+    ctx.stroke();
+
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const file = new File([blob], 'demo_selfie.jpg', { type: 'image/jpeg' });
+      handleFileSelect(file);
+    }, 'image/jpeg', 0.95);
+  };
+
   const handleFileSelect = (file: File) => {
     if (!file.type.startsWith('image/')) {
       setError('Please upload a valid image file (JPEG, PNG).');
@@ -304,6 +347,14 @@ export const VerifySelfiePage: React.FC = () => {
           >
             <Upload className="w-3.5 h-3.5" />
             <span>Photo Upload</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleUseDemoSelfie}
+            className="px-3 py-1.5 text-xs font-semibold rounded-lg flex items-center space-x-1.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 transition-colors"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+            <span>Demo Selfie</span>
           </button>
         </div>
 

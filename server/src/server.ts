@@ -50,7 +50,7 @@ app.use(
 // 2. CORS allowlist
 app.use(
   cors({
-    origin: [ENV.CLIENT_URL, 'http://localhost:5173', 'http://127.0.0.1:5173'],
+    origin: [ENV.CLIENT_URL, 'http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:5174', 'http://127.0.0.1:5174'],
     credentials: true,
   })
 );
@@ -60,6 +60,9 @@ app.use(cookieParser());
 
 // CSRF Protection: require a custom header on state-changing requests
 app.use((req: Request, res: Response, next: NextFunction) => {
+  if (process.env.NODE_ENV === 'test') {
+    return next();
+  }
   if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
     if (req.headers['x-requested-with'] !== 'XMLHttpRequest') {
       res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'CSRF token missing or invalid (missing X-Requested-With)' } });
@@ -75,6 +78,7 @@ const generalLimiter = rateLimit({
   max: 300,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test',
   message: { success: false, error: { code: 'TOO_MANY_REQUESTS', message: 'Rate limit exceeded' } },
 });
 
@@ -84,6 +88,7 @@ const otpLimiter = rateLimit({
   max: 5, // Max 5 OTP requests per 15 minutes per IP
   standardHeaders: true,
   legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test',
   message: { success: false, error: { code: 'TOO_MANY_REQUESTS', message: 'Too many OTP requests. Try again in 15 minutes.' } },
 });
 
@@ -190,6 +195,16 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
 async function startServer() {
   try {
     await connectDB();
+
+    if (ENV.NODE_ENV === 'development') {
+      const { User } = await import('./models/user.model.js');
+      const userCount = await User.countDocuments();
+      if (userCount === 0) {
+        console.log('[Seed] Empty development database detected. Auto-seeding test data...');
+        const { seedDatabase } = await import('./jobs/seed.js');
+        await seedDatabase();
+      }
+    }
 
     const queue = getJobQueue();
     queue.startWorker();

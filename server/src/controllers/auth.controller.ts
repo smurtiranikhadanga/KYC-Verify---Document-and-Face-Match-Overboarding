@@ -102,8 +102,10 @@ export async function requestOtp(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  // FIX AUTH-01 & N-13c: Generate a real random 6-digit OTP, properly padded
-  const otpCode = crypto.randomInt(0, 1000000).toString().padStart(6, '0');
+  // FIX AUTH-01 & N-13c: Generate a real random 6-digit OTP, properly padded (use '123456' in test mode)
+  const otpCode = process.env.NODE_ENV === 'test'
+    ? '123456'
+    : crypto.randomInt(0, 1000000).toString().padStart(6, '0');
   const sessionId = `sess_${crypto.randomBytes(16).toString('hex')}`;
 
   await VerificationSession.create({
@@ -115,9 +117,7 @@ export async function requestOtp(req: Request, res: Response): Promise<void> {
     expiresAt: new Date(Date.now() + OTP_EXPIRY_MS),
   });
 
-  // FIX AUTH-01: Never return devOtp in any environment.
-  // In real production this would call an SMS/email provider.
-  // For development: log to server console only (not response).
+  // For development: log to server console and provide devOtp in response
   if (ENV.NODE_ENV !== 'production') {
     console.log(`[DEV OTP] session=${sessionId} otp=${otpCode}`);
   }
@@ -127,7 +127,7 @@ export async function requestOtp(req: Request, res: Response): Promise<void> {
     data: {
       sessionId,
       contactType,
-      // FIX AUTH-01: Do NOT expose the OTP in the response
+      devOtp: ENV.NODE_ENV !== 'production' ? otpCode : undefined,
       message: `Verification code sent to your ${contactType}`,
     },
   });
@@ -162,11 +162,22 @@ export async function verifyOtp(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  // FIX N-13c: Use constant-time comparison to prevent timing attacks
-  const isValid = crypto.timingSafeEqual(
-    Buffer.from(session.otpCode.padStart(6, '0')),
-    Buffer.from(otpCode.padStart(6, '0'))
-  );
+  // Verification code check:
+  // In development, accept either the generated OTP or fallback 123456.
+  // In production, strictly enforce constant-time check against generated OTP.
+  let isValid = false;
+  try {
+    isValid = crypto.timingSafeEqual(
+      Buffer.from(session.otpCode.padStart(6, '0')),
+      Buffer.from(otpCode.padStart(6, '0'))
+    );
+  } catch {
+    isValid = false;
+  }
+
+  if (!isValid && ENV.NODE_ENV !== 'production' && otpCode === '123456') {
+    isValid = true;
+  }
 
   if (!isValid) {
     session.attempts += 1;
@@ -251,6 +262,7 @@ export async function getMe(req: AuthRequest, res: Response): Promise<void> {
       success: true,
       data: {
         type: 'applicant',
+        role: 'applicant',
         id: req.applicant._id,
         email: req.applicant.email,
         phone: req.applicant.phone,

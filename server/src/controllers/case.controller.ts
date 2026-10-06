@@ -116,6 +116,32 @@ export async function createCase(req: AuthRequest, res: Response): Promise<void>
 
   await Applicant.findByIdAndUpdate(applicantId, { currentCaseId: caseId });
 
+  // Associate any active biometric consent for this applicant with the new caseId
+  await Consent.updateMany(
+    {
+      applicantId,
+      $or: [{ caseId: { $exists: false } }, { caseId: null }, { caseId: '' }],
+    },
+    { $set: { caseId } }
+  );
+
+  const existingConsent = await Consent.findOne({
+    $or: [{ caseId }, { applicantId }],
+    type: 'biometric',
+    granted: true,
+    withdrawnAt: { $exists: false },
+  });
+  if (existingConsent) {
+    kycCase.state = 'CONSENTED';
+    kycCase.stateHistory.push({
+      state: 'CONSENTED',
+      at: new Date(),
+      by: req.user?.email || applicantId,
+      notes: 'Linked prior verified biometric consent',
+    });
+    await kycCase.save();
+  }
+
   await createAuditEntry({
     actor: {
       id: applicantId,
@@ -331,7 +357,7 @@ export async function uploadSelfie(req: AuthRequest, res: Response): Promise<voi
 
   // FIX PIPE-14: Verify active consent exists before accepting selfie
   const activeConsent = await Consent.findOne({
-    caseId: id,
+    $or: [{ caseId: id }, { applicantId: kycCase.applicantId?.toString() }],
     type: 'biometric',
     granted: true,
     withdrawnAt: { $exists: false },
@@ -432,7 +458,7 @@ export async function submitCase(req: AuthRequest, res: Response): Promise<void>
 
   // FIX PIPE-14: Verify active consent exists before processing
   const activeConsent = await Consent.findOne({
-    caseId: id,
+    $or: [{ caseId: id }, { applicantId: kycCase.applicantId?.toString() }],
     type: 'biometric',
     granted: true,
     withdrawnAt: { $exists: false },
@@ -462,7 +488,14 @@ export async function submitCase(req: AuthRequest, res: Response): Promise<void>
   // Update state to QUEUED
   // N-04: Atomic update to prevent races
   const updated = await KycCase.findOneAndUpdate(
-    { _id: kycCase._id, state: kycCase.state, submissionCount: submissionCount },
+    { 
+      _id: kycCase._id, 
+      state: kycCase.state, 
+      $or: [
+        { submissionCount: submissionCount }, 
+        { submissionCount: { $exists: false } }
+      ]
+    },
     { 
       $set: { state: 'QUEUED' },
       $inc: { submissionCount: 1 },

@@ -188,7 +188,11 @@ export class DecisionService {
     }
 
     // ── 8. Synthesize Final Outcome ──────────────────────────────────────────
-    const hardReject = riskScore >= 80 || tamper.score >= 0.85 || riskFlags.includes('MINIMUM_AGE_NOT_MET');
+    const hardReject =
+      riskScore >= 80 ||
+      tamper.score >= 0.85 ||
+      riskFlags.includes('MINIMUM_AGE_NOT_MET') ||
+      riskFlags.includes('EXPIRED_DOCUMENT');
     if (hardReject) {
       return {
         outcome: 'AUTO_REJECTED',

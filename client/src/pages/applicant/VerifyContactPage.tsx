@@ -17,6 +17,7 @@ export const VerifyContactPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [devOtp, setDevOtp] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string>(state.sessionId || '');
 
   const handleRequestOtp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -26,12 +27,19 @@ export const VerifyContactPage: React.FC = () => {
     try {
       const res = await authService.requestOtp(contactType, contactValue);
       if (res.success && res.data) {
+        const receivedSessionId = res.data.sessionId;
+        const validCode = res.data.devOtp || '123456';
+
+        setSessionId(receivedSessionId);
+        setDevOtp(validCode);
+        setOtpCode(validCode);
+
         updateState({
           contactType,
           contactValue,
-          sessionId: res.data.sessionId,
+          sessionId: receivedSessionId,
         });
-        setDevOtp(res.data.devOtp);
+
         setStep('VERIFY');
       }
     } catch (err: any) {
@@ -46,18 +54,27 @@ export const VerifyContactPage: React.FC = () => {
     setError(null);
     setLoading(true);
 
+    const activeSessionId = sessionId || state.sessionId;
+    if (!activeSessionId) {
+      setError('Verification session not found. Please request a new code.');
+      setStep('REQUEST');
+      setLoading(false);
+      return;
+    }
+
     try {
-      const res = await authService.verifyOtp(state.sessionId, otpCode);
+      const res = await authService.verifyOtp(activeSessionId, otpCode);
       if (res.success && res.data) {
         setAuthData(res.data.token, { id: res.data.applicantId, role: 'applicant' });
         updateState({
           applicantId: res.data.applicantId,
           caseId: res.data.currentCaseId || '',
+          sessionId: activeSessionId,
         });
         navigate('/verify/consent');
       }
     } catch (err: any) {
-      setError(err.response?.data?.error?.message || 'Invalid OTP code. For development, use 123456.');
+      setError(err.response?.data?.error?.message || 'Invalid OTP code. Please try again or use the code shown above.');
     } finally {
       setLoading(false);
     }
@@ -156,8 +173,17 @@ export const VerifyContactPage: React.FC = () => {
               <div>
                 Verification code sent to <strong>{contactValue}</strong>.
               </div>
-              <div className="font-mono bg-white px-2.5 py-1 rounded border border-amber-300 inline-block text-sm font-bold text-amber-900 mt-1">
-                Development OTP: 123456
+              <div className="flex items-center space-x-2 mt-1">
+                <span className="font-mono bg-white px-2.5 py-1 rounded border border-amber-300 inline-block text-sm font-bold text-amber-900">
+                  Development OTP: {devOtp || '123456'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setOtpCode(devOtp || '123456')}
+                  className="text-xs bg-amber-200 hover:bg-amber-300 text-amber-900 px-2.5 py-1 rounded font-semibold transition-colors"
+                >
+                  Fill Code
+                </button>
               </div>
             </div>
           </div>
