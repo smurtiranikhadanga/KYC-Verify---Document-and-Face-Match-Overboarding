@@ -61,14 +61,14 @@ export class DecisionService {
     if (!validation.formatOk) {
       reasonCodes.push('INVALID_DATE_FORMAT');
       riskFlags.push('DOCUMENT_DATE_UNPARSEABLE');
-      riskScore += 30;
+      riskScore += 15;
     }
 
     if (!validation.crossFieldOk) {
       // crossFieldOk = mrzValid && formatOk
       reasonCodes.push('MRZ_CHECKSUM_INVALID');
       riskFlags.push('MRZ_VALIDATION_FAILED');
-      riskScore += 40;
+      riskScore += 20;
     }
 
     // FIX N-10: Removed early exit here to allow collection of all fraud signals (PIPE-16).
@@ -92,15 +92,15 @@ export class DecisionService {
     if (lowestOcrConf < policy.ocrConfidenceThreshold) {
       reasonCodes.push('OCR_LOW_CONF');
       riskFlags.push('OCR_UNREADABLE_FIELD');
-      riskScore += 25;
+      riskScore += 15;
     }
 
     // ── FIX N-09: OCR Data Missing & Minimum Age Check ───────────────────────
-    // Reject if critical fields are completely empty (prevent fail-open)
+    // Route to manual review if critical fields are empty (e.g. native heuristic OCR)
     if (!ocr.fields.fullName?.value || !ocr.fields.idNumber?.value || !ocr.fields.dob?.value) {
       reasonCodes.push('OCR_MISSING_DATA');
       riskFlags.push('MISSING_CRITICAL_DATA');
-      riskScore += 40;
+      riskScore += 20;
     }
 
     const minAge = policy.minimumAgeYears ?? 18;
@@ -117,13 +117,13 @@ export class DecisionService {
       } else {
         reasonCodes.push('DOB_UNPARSEABLE');
         riskFlags.push('INVALID_DATE_OF_BIRTH');
-        riskScore += 20;
+        riskScore += 15;
       }
     } else {
-      // DOB is missing entirely
+      // DOB is missing entirely from OCR
       reasonCodes.push('DOB_MISSING');
       riskFlags.push('INVALID_DATE_OF_BIRTH');
-      riskScore += 20;
+      riskScore += 15;
     }
 
     // ── 4. Tamper ────────────────────────────────────────────────────────────
@@ -144,12 +144,12 @@ export class DecisionService {
       const faceError: string = (face as any).error;
       reasonCodes.push(faceError);
       riskFlags.push('BIOMETRIC_ERROR');
-      riskScore += 30;
+      riskScore += 25;
       priority += 15;
     } else if (!face.match || face.similarity < policy.faceMatchThreshold) {
       reasonCodes.push('LOW_FACE_MATCH');
       riskFlags.push('BIOMETRIC_MISMATCH');
-      riskScore += 35;
+      riskScore += 30;
       priority += 20;
     }
 
@@ -161,15 +161,15 @@ export class DecisionService {
       priority += 15;
     } else if (!liveness.passed || liveness.score < policy.livenessThreshold) {
       // FIX PIPE-16: Liveness failure alone should auto-reject when score is very low
-      if (liveness.score < policy.livenessThreshold * 0.5) {
+      if (liveness.score < policy.livenessThreshold * 0.4) {
         reasonCodes.push('LIVENESS_FAILED');
         riskFlags.push('LIVENESS_VERIFICATION_FAILED');
-        riskScore += 50;
+        riskScore += 45;
         priority += 30;
       } else {
         reasonCodes.push('LIVENESS_BORDERLINE');
         riskFlags.push('LIVENESS_BORDERLINE');
-        riskScore += 30;
+        riskScore += 25;
         priority += 20;
       }
     }
@@ -189,10 +189,12 @@ export class DecisionService {
 
     // ── 8. Synthesize Final Outcome ──────────────────────────────────────────
     const hardReject =
-      riskScore >= 80 ||
       tamper.score >= 0.85 ||
+      tamper.metadataFlags.includes('EXIF_EDITING_SOFTWARE_DETECTED') ||
       riskFlags.includes('MINIMUM_AGE_NOT_MET') ||
-      riskFlags.includes('EXPIRED_DOCUMENT');
+      riskFlags.includes('EXPIRED_DOCUMENT') ||
+      (liveness.score < 0.20 && !liveness.passed) ||
+      (riskScore >= 85 && tamper.score > 0.60);
     if (hardReject) {
       return {
         outcome: 'AUTO_REJECTED',
