@@ -6,8 +6,8 @@ let aiInstance: IAIService;
 
 export function getAIService(): IAIService {
   if (!aiInstance) {
-    if (process.env.USE_PYTHON_AI === 'true') {
-      aiInstance = new FuturePythonAIService();
+    if (process.env.USE_PYTHON_AI === 'true' || process.env.AI_SERVICE_URL) {
+      aiInstance = new FuturePythonAIService(process.env.AI_SERVICE_URL);
     } else {
       aiInstance = new MockAIService();
     }
