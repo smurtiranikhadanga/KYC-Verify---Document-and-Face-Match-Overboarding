@@ -15,6 +15,7 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
   fileFilter: (_req, file, cb) => {
+    // FIX SEC-02: MIME type allowlist enforced at multer level too
     const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
     if (allowed.includes(file.mimetype)) {
       cb(null, true);
@@ -26,13 +27,20 @@ const upload = multer({
 
 const router = Router();
 
-router.post('/', optionalAuth, createCase);
-router.get('/:id', optionalAuth, getCaseById);
-router.get('/:id/status', getCaseStatus);
+// FIX AUTH-03: All mutation routes require authentication
+// Case creation requires auth so applicantId comes from token, not body
+router.post('/', requireAuth, createCase);
 
+// FIX AUTH-03: Case reads require auth; ownership is checked inside controller
+router.get('/:id', requireAuth, getCaseById);
+
+// FIX AUTH-03: Status requires auth to prevent threshold-probing
+router.get('/:id/status', requireAuth, getCaseStatus);
+
+// FIX AUTH-03: Upload and submit require auth
 router.post(
   '/:id/documents',
-  optionalAuth,
+  requireAuth,
   upload.fields([
     { name: 'front', maxCount: 1 },
     { name: 'back', maxCount: 1 },
@@ -40,8 +48,10 @@ router.post(
   uploadDocuments
 );
 
-router.post('/:id/selfie', optionalAuth, upload.single('selfie'), uploadSelfie);
-router.post('/:id/submit', optionalAuth, submitCase);
-router.post('/:id/resubmit', optionalAuth, resubmitCase);
+router.post('/:id/selfie', requireAuth, upload.single('selfie'), uploadSelfie);
+
+// FIX PIPE-11: submit and resubmit require auth + state checks (in controller)
+router.post('/:id/submit', requireAuth, submitCase);
+router.post('/:id/resubmit', requireAuth, resubmitCase);
 
 export default router;

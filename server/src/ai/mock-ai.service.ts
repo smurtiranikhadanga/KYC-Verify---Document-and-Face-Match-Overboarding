@@ -53,17 +53,36 @@ export class MockAIService implements IAIService {
     return { quality, ocr, validation, tamper };
   }
 
+  /**
+   * FIX PIPE-03: activeChallenge parameter is now passed through to the
+   * liveness service. When a challenge is requested, the liveness service
+   * requires challengeFrames to evaluate it; absence penalizes the score.
+   *
+   * The server-side pipeline must be the authority on whether the challenge
+   * was evaluated — client-side gating alone is insufficient.
+   */
   async verifyFaceAndLiveness(
     selfieBuffer: Buffer,
     documentFrontBuffer: Buffer,
     caseId = 'demo-case',
-    activeChallenge: 'turn_left' | 'turn_right' | 'blink' | 'nod' | 'none' = 'none'
+    activeChallenge: 'turn_left' | 'turn_right' | 'blink' | 'nod' | 'none' = 'none',
+    challengeFrames?: Buffer[]
   ): Promise<{
     face: FaceVerificationResult;
     liveness: LivenessResult;
   }> {
     const face = await this.faceService.compareFaces(selfieBuffer, documentFrontBuffer, caseId);
-    const liveness = await this.livenessService.evaluateLiveness(selfieBuffer, caseId, activeChallenge);
+
+    // FIX PIPE-03: Pass activeChallenge and challengeFrames to the liveness service.
+    // If activeChallenge != 'none' and no challengeFrames provided, the liveness
+    // service will penalize the score (activeScore=0).
+    const liveness = await this.livenessService.evaluateLiveness(
+      selfieBuffer,
+      caseId,
+      activeChallenge,
+      0.60,
+      challengeFrames
+    );
 
     return { face, liveness };
   }
@@ -75,7 +94,9 @@ export class MockAIService implements IAIService {
     frontBuffer: Buffer,
     backBuffer: Buffer | undefined,
     selfieBuffer: Buffer,
-    policyConfig?: DecisionPolicy
+    policyConfig?: DecisionPolicy,
+    activeChallenge?: 'turn_left' | 'turn_right' | 'blink' | 'nod' | 'none',
+    challengeFrames?: Buffer[]
   ): Promise<AIAnalysisOutput> {
     const { quality, ocr, validation, tamper } = await this.analyzeDocument(
       frontBuffer,
@@ -85,10 +106,13 @@ export class MockAIService implements IAIService {
       caseId
     );
 
+    // FIX PIPE-03: Pass challenge context from the job data
     const { face, liveness } = await this.verifyFaceAndLiveness(
       selfieBuffer,
       frontBuffer,
-      caseId
+      caseId,
+      activeChallenge ?? 'none',
+      challengeFrames
     );
 
     const decisionResult = this.decisionService.evaluateDecision(

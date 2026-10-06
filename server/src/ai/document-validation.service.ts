@@ -13,17 +13,11 @@ export class DocumentValidationService {
     const stats = await analyzeImage(docBuffer);
     const docRegion = await estimateDocumentRegion(docBuffer);
 
-    // --- Blur: Laplacian variance. blurScore 0=blurry, 1=sharp ---
-    const blur = Number((1.0 - stats.blurScore).toFixed(3)); // invert: low is good
-
-    // --- Glare: very high brightness means glare ---
+    const blur = Number((1.0 - stats.blurScore).toFixed(3));
     const glareRaw = stats.brightnessScore > 0.82 ? (stats.brightnessScore - 0.82) / 0.18 : 0;
     const glare = Number(Math.min(1.0, glareRaw).toFixed(3));
-
-    // --- Brightness: optimal is 0.35-0.75 ---
     const brightness = Number(stats.brightnessScore.toFixed(3));
 
-    // Build issues list
     const issues: string[] = [];
 
     if (stats.blurScore < 0.20) issues.push('IMAGE_TOO_BLURRY');
@@ -34,13 +28,12 @@ export class DocumentValidationService {
     if (!docRegion.aspectRatioOk) issues.push('WRONG_ASPECT_RATIO');
     if (!docRegion.hasTextRegions) issues.push('NO_TEXT_REGIONS_DETECTED');
 
-    // Overall score
     let score = 1.0;
-    score -= (1.0 - stats.blurScore) * 0.35;            // blur penalty
-    score -= Math.max(0, stats.brightnessScore - 0.80) * 0.15; // glare penalty
-    score -= Math.max(0, 0.25 - stats.brightnessScore) * 0.15; // darkness penalty
-    score -= docRegion.looksLikeDocument ? 0 : 0.30;    // not-a-document penalty
-    score -= docRegion.hasTextRegions ? 0 : 0.15;       // no text penalty
+    score -= (1.0 - stats.blurScore) * 0.35;
+    score -= Math.max(0, stats.brightnessScore - 0.80) * 0.15;
+    score -= Math.max(0, 0.25 - stats.brightnessScore) * 0.15;
+    score -= docRegion.looksLikeDocument ? 0 : 0.30;
+    score -= docRegion.hasTextRegions ? 0 : 0.15;
     score = Number(Math.max(0, Math.min(1.0, score)).toFixed(3));
 
     const passed = score >= 0.50 && issues.length === 0;
@@ -65,7 +58,12 @@ export class DocumentValidationService {
   }
 
   /**
-   * Validates document expiry, MRZ structure, and cross-field consistency
+   * Validates document expiry, MRZ structure, and cross-field consistency.
+   *
+   * FIX PIPE-06: 'new Date(garbage)' previously produced NaN → expired=false.
+   * Now: invalid date → formatOk=false → crossFieldOk=false, which the decision
+   * engine uses to reject/escalate. expired=false is ONLY returned when date is
+   * valid AND in the future.
    */
   validateDocument(
     expiryDateStr: string,
@@ -74,14 +72,17 @@ export class DocumentValidationService {
   ): DocumentValidationResult {
     const expiry = new Date(expiryDateStr);
     const now = new Date();
-    const expired = expiry.getTime() < now.getTime();
-    const formatOk = !isNaN(expiry.getTime());
-    const crossFieldOk = mrzValid && formatOk;
+
+    // FIX PIPE-06: Treat NaN as formatOk=false (not as "not expired")
+    const formatOk = !isNaN(expiry.getTime()) && expiryDateStr.trim() !== '';
+    const expired = formatOk ? expiry.getTime() < now.getTime() : false;
+    // crossFieldOk requires both a parseable date AND a valid MRZ
+    const crossFieldOk = formatOk && mrzValid && !expired;
 
     const details: string[] = [];
+    if (!formatOk) details.push('INVALID_DATE_FORMAT');
     if (expired) details.push('DOCUMENT_EXPIRED');
     if (!mrzValid) details.push('MRZ_CHECKSUM_MISMATCH');
-    if (!formatOk) details.push('INVALID_DATE_FORMAT');
 
     return { expired, formatOk, crossFieldOk, details };
   }

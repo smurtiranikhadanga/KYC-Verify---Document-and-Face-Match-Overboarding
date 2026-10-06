@@ -33,7 +33,8 @@ export async function requireAuth(req: AuthRequest, res: Response, next: NextFun
 
     if (decoded.role === 'applicant') {
       const applicant = await Applicant.findById(decoded.id);
-      if (!applicant || applicant.status === 'erased') {
+      // FIX AUTH-02: check suspended status too, not just 'erased'
+      if (!applicant || applicant.status === 'erased' || applicant.status === 'suspended') {
         res.status(401).json({
           success: false,
           error: { code: 'UNAUTHORIZED', message: 'Applicant account no longer active' },
@@ -67,17 +68,55 @@ export async function requireAuth(req: AuthRequest, res: Response, next: NextFun
   }
 }
 
-export function optionalAuth(req: AuthRequest, _res: Response, next: NextFunction): void {
+/**
+ * FIX AUTH-02: optionalAuth now fully decodes both user and applicant,
+ * not just setting req.role. This ensures ownership checks in getCaseById work.
+ */
+export async function optionalAuth(req: AuthRequest, _res: Response, next: NextFunction): Promise<void> {
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  let token: string | undefined;
+
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.split(' ')[1];
+  } else if (req.cookies && req.cookies.token) {
+    token = req.cookies.token;
+  }
+
+  if (!token) {
     return next();
   }
-  const token = authHeader.split(' ')[1];
+
   try {
     const decoded = jwt.verify(token, ENV.JWT_SECRET) as any;
     req.role = decoded.role;
+
+    if (decoded.role === 'applicant') {
+      const applicant = await Applicant.findById(decoded.id);
+      if (applicant && applicant.status !== 'erased' && applicant.status !== 'suspended') {
+        req.applicant = applicant;
+      }
+    } else {
+      const user = await User.findById(decoded.id);
+      if (user && user.isActive) {
+        req.user = user;
+        req.role = user.role;
+      }
+    }
     next();
   } catch {
     next();
   }
+}
+
+export function requireRole(...roles: string[]) {
+  return (req: AuthRequest, res: Response, next: NextFunction): void => {
+    if (!req.role || !roles.includes(req.role)) {
+      res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'Insufficient permissions' },
+      });
+      return;
+    }
+    next();
+  };
 }

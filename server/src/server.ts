@@ -2,14 +2,16 @@ import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import cookieParser from 'cookie-parser';
 import path from 'path';
 import fs from 'fs';
 import { ENV } from './config/env.js';
 import { connectDB } from './config/db.js';
 import apiRouter from './routes/index.js';
 import { getJobQueue } from './jobs/index.js';
-import { User } from './models/user.model.js';
-import { seedDatabase } from './jobs/seed.js';
+import { requireAuth } from './middleware/auth.middleware.js';
+import { Artifact } from './models/artifact.model.js';
+import { KycCase } from './models/case.model.js';
 
 const app = express();
 
@@ -21,7 +23,15 @@ if (!fs.existsSync(ENV.UPLOAD_DIR)) {
 // 1. Security middleware
 app.use(
   helmet({
-    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    crossOriginResourcePolicy: { policy: 'same-origin' }, // FIX SEC-01: was cross-origin
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:', 'blob:'],
+      },
+    },
   })
 );
 
@@ -33,22 +43,86 @@ app.use(
   })
 );
 
-// 3. Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 mins
-  max: 500, // Limit each IP to 500 requests per window
+// FIX AUTH-04: cookie-parser is required for req.cookies to work
+app.use(cookieParser());
+
+// 3. Rate limiting (stricter for auth endpoints)
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, error: { code: 'TOO_MANY_REQUESTS', message: 'Rate limit exceeded' } },
 });
-app.use('/api', limiter);
+
+// FIX AUTH-01: Strict rate limit on OTP request endpoint
+const otpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5, // Max 5 OTP requests per 15 minutes per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: { code: 'TOO_MANY_REQUESTS', message: 'Too many OTP requests. Try again in 15 minutes.' } },
+});
+
+app.use('/api', generalLimiter);
+app.use('/api/auth/request-otp', otpLimiter);
 
 // 4. Body parsing
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
-// 5. Static uploads serving
-app.use('/uploads', express.static(ENV.UPLOAD_DIR));
+// ─────────────────────────────────────────────────────────────────────────────
+// FIX SEC-01: Remove express.static('/uploads') — it served ID documents and
+// selfies with NO authentication. Replace with an authenticated file-serving
+// endpoint that checks ownership before returning file bytes.
+// ─────────────────────────────────────────────────────────────────────────────
+app.get('/uploads/*', requireAuth as any, async (req: any, res: Response) => {
+  try {
+    const relativePath = req.params[0];
+    const fullPath = path.join(ENV.UPLOAD_DIR, relativePath);
+
+    // Prevent path traversal
+    const resolvedPath = path.resolve(fullPath);
+    const resolvedUploadDir = path.resolve(ENV.UPLOAD_DIR);
+    if (!resolvedPath.startsWith(resolvedUploadDir)) {
+      res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'Invalid path' } });
+      return;
+    }
+
+    if (!fs.existsSync(resolvedPath)) {
+      res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'File not found' } });
+      return;
+    }
+
+    // Find the artifact to check ownership
+    const artifact = await Artifact.findOne({ storageKey: relativePath });
+    if (!artifact) {
+      res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Artifact not found' } });
+      return;
+    }
+
+    // Ownership: applicants can only view their own case files
+    if (req.role === 'applicant' && req.applicant) {
+      const kycCase = await KycCase.findOne({ caseId: artifact.caseId });
+      if (!kycCase || kycCase.applicantId.toString() !== req.applicant._id.toString()) {
+        res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Access denied' } });
+        return;
+      }
+    }
+
+    // Serve the file with correct content-type
+    // FIX SEC-02: Use stored mimeType, NOT the client-supplied extension
+    const safeContentType = artifact.mimeType || 'application/octet-stream';
+    res.setHeader('Content-Type', safeContentType);
+    res.setHeader('Cache-Control', 'private, no-cache');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+
+    const fileStream = fs.createReadStream(resolvedPath);
+    fileStream.pipe(res);
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: 'File serving error' } });
+  }
+});
 
 // 6. API routes
 app.use('/api', apiRouter);
@@ -57,38 +131,42 @@ app.use('/api', apiRouter);
 app.use((_req: Request, res: Response) => {
   res.status(404).json({
     success: false,
-    error: { code: 'NOT_FOUND', message: 'Requested API endpoint does not exist' },
+    error: { code: 'NOT_FOUND', message: 'Requested endpoint does not exist' },
   });
 });
 
-// 8. Global error handling middleware
+// 8. Global error handling — FIX: never expose internal error.message to clients
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   console.error('[ServerError]', err);
   const status = err.status || 500;
-  res.status(status).json({
-    success: false,
-    error: {
-      code: err.code || 'INTERNAL_SERVER_ERROR',
-      message: err.message || 'An unexpected error occurred',
-    },
-  });
+
+  // FIX: Map known error types without exposing internal details
+  let publicMessage = 'An unexpected error occurred';
+  let code = 'INTERNAL_SERVER_ERROR';
+
+  if (err.name === 'CastError' || err.message?.includes('Cast to ObjectId')) {
+    res.status(400).json({ success: false, error: { code: 'INVALID_ID', message: 'Invalid identifier format' } });
+    return;
+  }
+  if (err.name === 'MulterError') {
+    if (err.code === 'LIMIT_FILE_SIZE') publicMessage = 'File too large. Maximum 10MB allowed.';
+    else publicMessage = 'File upload error.';
+    code = 'UPLOAD_ERROR';
+    res.status(400).json({ success: false, error: { code, message: publicMessage } });
+    return;
+  }
+  if (status === 400) {
+    code = err.code || 'BAD_REQUEST';
+    publicMessage = 'Bad request';
+  }
+
+  res.status(status).json({ success: false, error: { code, message: publicMessage } });
 });
 
 // Start Server
 async function startServer() {
   try {
     await connectDB();
-
-    // Auto-seed if database is empty (e.g. initial run or in-memory fallback)
-    try {
-      const userCount = await User.countDocuments();
-      if (userCount === 0) {
-        console.log('[Server] Database is empty. Auto-seeding initial staff, applicants, and cases...');
-        await seedDatabase();
-      }
-    } catch (seedErr: any) {
-      console.warn('[Server] Auto-seed check warning:', seedErr.message);
-    }
 
     const queue = getJobQueue();
     queue.startWorker();
@@ -98,7 +176,7 @@ async function startServer() {
       console.log(`KYC-Flow Core Server running on port: ${ENV.PORT}`);
       console.log(`Environment: ${ENV.NODE_ENV}`);
       console.log(`API URL: http://localhost:${ENV.PORT}/api`);
-      console.log(`Static Uploads: http://localhost:${ENV.PORT}/uploads`);
+      console.log(`Authenticated file serving: http://localhost:${ENV.PORT}/uploads/*`);
       console.log(`===============================================`);
     });
   } catch (error: any) {

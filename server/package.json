@@ -10,7 +10,9 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@types/cookie-parser": "^1.4.10",
     "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "exif-reader": "^2.0.3",

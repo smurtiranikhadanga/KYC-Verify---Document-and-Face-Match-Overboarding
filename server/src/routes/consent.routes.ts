@@ -1,12 +1,13 @@
 import { Router } from 'express';
 import { createConsent, withdrawConsent, getConsents } from '../controllers/consent.controller.js';
-import { requireAuth, optionalAuth } from '../middleware/auth.middleware.js';
+import { requireAuth } from '../middleware/auth.middleware.js';
 import { requireRole } from '../middleware/rbac.middleware.js';
 
 const router = Router();
 
-router.post('/', optionalAuth, createConsent);
-router.delete('/:id', optionalAuth, withdrawConsent);
+// FIX AUTH-03: Consent creation and withdrawal require authentication
+router.post('/', requireAuth, createConsent);
+router.delete('/:id', requireAuth, withdrawConsent);
 router.get('/', requireAuth, requireRole('compliance_officer', 'senior_reviewer', 'auditor', 'admin'), getConsents);
 
 export default router;

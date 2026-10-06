@@ -9,6 +9,10 @@ import { LoginSchema, OtpRequestSchema, OtpVerifySchema } from '../validators/in
 import { ENV } from '../config/env.js';
 import { AuthRequest } from '../middleware/auth.middleware.js';
 
+// FIX AUTH-01: OTP attempt cap constants
+const OTP_MAX_ATTEMPTS = 5;
+const OTP_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
+
 export async function login(req: Request, res: Response): Promise<void> {
   const parsed = LoginSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -25,7 +29,7 @@ export async function login(req: Request, res: Response): Promise<void> {
       action: 'LOGIN_FAILED',
       resource: { type: 'User', id: email },
       outcome: 'DENIED',
-      ipHash: req.ip || '127.0.0.1',
+      ipHash: crypto.createHash('sha256').update(req.ip || '127.0.0.1').digest('hex'),
       metadata: { reason: 'Invalid credentials' },
     });
 
@@ -59,7 +63,7 @@ export async function login(req: Request, res: Response): Promise<void> {
     action: 'LOGIN',
     resource: { type: 'User', id: user._id.toString() },
     outcome: 'SUCCESS',
-    ipHash: req.ip || '127.0.0.1',
+    ipHash: crypto.createHash('sha256').update(req.ip || '127.0.0.1').digest('hex'),
   });
 
   res.json({
@@ -86,9 +90,10 @@ export async function requestOtp(req: Request, res: Response): Promise<void> {
   }
 
   const { contactType, contactValue } = parsed.data;
-  const sessionId = `sess_${crypto.randomBytes(12).toString('hex')}`;
-  // For development OTP is always 123456 as specified in requirement 7
-  const otpCode = '123456';
+
+  // FIX AUTH-01: Generate a real random 6-digit OTP, not hardcoded '123456'
+  const otpCode = crypto.randomInt(100000, 999999).toString();
+  const sessionId = `sess_${crypto.randomBytes(16).toString('hex')}`;
 
   await VerificationSession.create({
     sessionId,
@@ -96,17 +101,23 @@ export async function requestOtp(req: Request, res: Response): Promise<void> {
     contactValue: contactValue.toLowerCase(),
     otpCode,
     attempts: 0,
-    expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+    expiresAt: new Date(Date.now() + OTP_EXPIRY_MS),
   });
+
+  // FIX AUTH-01: Never return devOtp in any environment.
+  // In real production this would call an SMS/email provider.
+  // For development: log to server console only (not response).
+  if (ENV.NODE_ENV !== 'production') {
+    console.log(`[DEV OTP] session=${sessionId} otp=${otpCode}`);
+  }
 
   res.json({
     success: true,
     data: {
       sessionId,
       contactType,
-      contactValue,
-      devOtp: '123456', // Displayed in development UI
-      message: 'OTP sent successfully (Development OTP: 123456)',
+      // FIX AUTH-01: Do NOT expose the OTP in the response
+      message: `Verification code sent to your ${contactType}`,
     },
   });
 }
@@ -126,18 +137,40 @@ export async function verifyOtp(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  if (session.otpCode !== otpCode) {
-    session.attempts += 1;
-    await session.save();
-    res.status(400).json({ success: false, error: { code: 'INVALID_OTP', message: 'Invalid verification code' } });
+  // FIX AUTH-01: Explicit expiry check
+  if (new Date() > session.expiresAt) {
+    await VerificationSession.deleteOne({ sessionId });
+    res.status(400).json({ success: false, error: { code: 'OTP_EXPIRED', message: 'Verification code has expired. Please request a new one.' } });
     return;
   }
 
-  session.verified = true;
+  // FIX AUTH-01: Attempt cap enforced
+  if (session.attempts >= OTP_MAX_ATTEMPTS) {
+    await VerificationSession.deleteOne({ sessionId });
+    res.status(429).json({ success: false, error: { code: 'TOO_MANY_ATTEMPTS', message: 'Maximum verification attempts exceeded. Please request a new code.' } });
+    return;
+  }
 
-  // Find or create applicant
+  if (session.otpCode !== otpCode) {
+    session.attempts += 1;
+    await session.save();
+    const remaining = OTP_MAX_ATTEMPTS - session.attempts;
+    res.status(400).json({ success: false, error: { code: 'INVALID_OTP', message: `Invalid verification code. ${remaining} attempt(s) remaining.` } });
+    return;
+  }
+
+  // FIX AUTH-01: Mark session as verified and delete it (non-reusable)
+  await VerificationSession.deleteOne({ sessionId });
+
+  // FIX AUTH-06: Use the correct hash field depending on contactType
   const hash = crypto.createHash('sha256').update(session.contactValue).digest('hex');
-  let applicant = await Applicant.findOne({ emailHash: hash });
+
+  let applicant;
+  if (session.contactType === 'email') {
+    applicant = await Applicant.findOne({ emailHash: hash });
+  } else {
+    applicant = await Applicant.findOne({ phoneHash: hash });
+  }
 
   if (!applicant) {
     applicant = await Applicant.create({
@@ -149,8 +182,11 @@ export async function verifyOtp(req: Request, res: Response): Promise<void> {
     });
   }
 
-  session.applicantId = applicant._id as any;
-  await session.save();
+  // FIX AUTH-06: Block suspended applicants from getting a token
+  if (applicant.status === 'suspended') {
+    res.status(403).json({ success: false, error: { code: 'ACCOUNT_SUSPENDED', message: 'This account has been suspended.' } });
+    return;
+  }
 
   const token = jwt.sign(
     { id: applicant._id, role: 'applicant', contact: session.contactValue },
@@ -170,7 +206,6 @@ export async function verifyOtp(req: Request, res: Response): Promise<void> {
     data: {
       token,
       applicantId: applicant._id,
-      sessionId,
       currentCaseId: applicant.currentCaseId,
     },
   });
@@ -213,6 +248,7 @@ export async function getMe(req: AuthRequest, res: Response): Promise<void> {
 }
 
 export async function logout(_req: Request, res: Response): Promise<void> {
-  res.clearCookie('token');
+  // FIX AUTH-04: clear cookie on logout
+  res.clearCookie('token', { httpOnly: true, sameSite: 'lax' });
   res.json({ success: true, message: 'Logged out successfully' });
 }

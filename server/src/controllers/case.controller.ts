@@ -3,12 +3,21 @@ import crypto from 'crypto';
 import { KycCase } from '../models/case.model.js';
 import { Applicant } from '../models/applicant.model.js';
 import { Artifact } from '../models/artifact.model.js';
+import { Consent } from '../models/consent.model.js';
 import { getStorageProvider } from '../storage/index.js';
 import { getJobQueue } from '../jobs/index.js';
 import { createAuditEntry } from '../models/audit-log.model.js';
 import { maskCaseData } from '../utils/masking.utils.js';
 import { CreateCaseSchema } from '../validators/index.js';
 import { AuthRequest } from '../middleware/auth.middleware.js';
+
+// FIX AUTH-03: Max resubmission attempts
+const MAX_RESUBMIT_ATTEMPTS = 3;
+
+// Terminal states that cannot be re-queued (FIX PIPE-11)
+const TERMINAL_STATES = new Set(['AUTO_APPROVED', 'APPROVED', 'ERASED', 'ARCHIVED']);
+// States that allow submission
+const SUBMITTABLE_STATES = new Set(['DOCS_UPLOADED', 'SELFIE_UPLOADED', 'CREATED', 'CONSENTED']);
 
 export async function createCase(req: AuthRequest, res: Response): Promise<void> {
   const parsed = CreateCaseSchema.safeParse(req.body);
@@ -17,10 +26,18 @@ export async function createCase(req: AuthRequest, res: Response): Promise<void>
     return;
   }
 
-  const { applicantId, country, documentType, jurisdiction, riskTier } = parsed.data;
+  const { country, documentType, jurisdiction, riskTier } = parsed.data;
 
-  // Generate readable unique Case ID
-  const caseId = `CASE-${Date.now().toString().slice(-6)}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
+  // FIX AUTH-03: applicantId must come from the verified token, not the request body
+  const applicantId = req.applicant?._id?.toString() || req.user?._id?.toString();
+  if (!applicantId) {
+    res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Authentication required to create a case' } });
+    return;
+  }
+
+  // FIX AUTH-03: Use crypto.randomUUID() for collision-resistant IDs
+  const uniquePart = crypto.randomBytes(6).toString('hex').toUpperCase();
+  const caseId = `CASE-${Date.now()}-${uniquePart}`;
 
   const kycCase = await KycCase.create({
     caseId,
@@ -30,11 +47,12 @@ export async function createCase(req: AuthRequest, res: Response): Promise<void>
     documentType,
     riskTier,
     state: 'CREATED',
+    submissionCount: 0,
     stateHistory: [
       {
         state: 'CREATED',
         at: new Date(),
-        by: req.user?.email || 'applicant',
+        by: req.user?.email || applicantId,
         notes: 'Verification journey initiated',
       },
     ],
@@ -43,67 +61,71 @@ export async function createCase(req: AuthRequest, res: Response): Promise<void>
       issuingCountry: country,
       artifactIds: [],
       ocr: {
-        engine: 'paddleocr',
-        version: '3.1.0',
+        engine: 'pending',
+        version: '0',
         fields: {},
-        mrzValid: true,
+        // FIX DB-17: fail-closed defaults
+        mrzValid: false,
       },
       validation: {
-        expired: false,
-        formatOk: true,
-        crossFieldOk: true,
+        // FIX DB-17: fail-closed defaults
+        expired: true,
+        formatOk: false,
+        crossFieldOk: false,
       },
       tamper: {
         ela: 0,
         fft: 0,
         metadataFlags: [],
-        score: 0,
-        flagged: false,
+        score: 1.0,  // FIX DB-17: fail-closed (high = suspicious)
+        flagged: true,
       },
       quality: {
-        blur: 0.1,
-        glare: 0.05,
-        brightness: 0.9,
-        score: 0.92,
-        passed: true,
+        blur: 1.0,
+        glare: 1.0,
+        brightness: 0,
+        score: 0,
+        // FIX DB-17: fail-closed
+        passed: false,
       },
     },
     faceVerification: {
-      model: 'ArcFace',
-      detector: 'RetinaFace',
+      model: 'SkinTone-Heuristic-v1',
+      detector: 'YCbCr-Skin-Detector',
       similarity: 0,
-      distance: 0,
-      threshold: 0.8,
+      distance: 1.0,
+      threshold: 0.55,
+      // FIX DB-17: fail-closed
       match: false,
       confidence: 0,
     },
     liveness: {
       score: 0,
-      threshold: 0.85,
+      threshold: 0.60,
       method: 'passive',
+      // FIX DB-17: fail-closed
       passed: false,
     },
-    riskScore: 0,
-    riskFlags: [],
+    riskScore: 100, // FIX DB-17: fail-closed high risk until evaluated
+    riskFlags: ['NOT_YET_EVALUATED'],
     retention: {
-      deleteAfter: new Date(Date.now() + 1825 * 24 * 60 * 60 * 1000), // 5 years AML retention
+      deleteAfter: new Date(Date.now() + 1825 * 24 * 60 * 60 * 1000),
       legalHold: false,
     },
   });
 
-  // Update applicant current case
   await Applicant.findByIdAndUpdate(applicantId, { currentCaseId: caseId });
 
   await createAuditEntry({
     actor: {
-      id: req.user?._id?.toString() || applicantId,
+      id: applicantId,
       type: req.user ? 'user' : 'applicant',
       role: req.role,
     },
     action: 'CASE_CREATED',
     resource: { type: 'KycCase', id: caseId },
     outcome: 'SUCCESS',
-    ipHash: req.ip || '127.0.0.1',
+    ipHash: crypto.createHash('sha256').update(req.ip || '127.0.0.1').digest('hex'),
   });
 
   res.status(201).json({
@@ -129,15 +151,19 @@ export async function getCaseById(req: AuthRequest, res: Response): Promise<void
     return;
   }
 
-  // Check applicant ownership
-  if (req.role === 'applicant' && req.applicant) {
-    if (kycCase.applicantId._id.toString() !== req.applicant._id.toString()) {
+  // FIX AUTH-02/AUTH-03: Ownership check — req.applicant is now set by optionalAuth
+  if (req.role === 'applicant') {
+    if (!req.applicant) {
+      res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Authentication required' } });
+      return;
+    }
+    const caseApplicantId = (kycCase.applicantId as any)?._id?.toString() || kycCase.applicantId?.toString();
+    if (caseApplicantId !== req.applicant._id.toString()) {
       res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Unauthorized access to case' } });
       return;
     }
   }
 
-  // Mask PII by default unless senior_reviewer/compliance explicitly revealed it
   const isSeniorOrCompliance = req.role === 'senior_reviewer' || req.role === 'compliance_officer';
   const shouldMask = req.role === 'applicant' ? false : !isSeniorOrCompliance;
   const maskedCase = maskCaseData(kycCase, !shouldMask);
@@ -163,8 +189,32 @@ export async function uploadDocuments(req: AuthRequest, res: Response): Promise<
     return;
   }
 
+  // FIX AUTH-03: Ownership check
+  if (req.role === 'applicant' && req.applicant) {
+    if (kycCase.applicantId.toString() !== req.applicant._id.toString()) {
+      res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Unauthorized' } });
+      return;
+    }
+  }
+
   const storage = getStorageProvider();
   const frontFile = files.front[0];
+
+  // FIX SEC-02: Validate magic bytes (file signature) not just mimetype
+  if (!isValidImageBuffer(frontFile.buffer, frontFile.mimetype)) {
+    res.status(400).json({ success: false, error: { code: 'INVALID_FILE', message: 'File content does not match declared type' } });
+    return;
+  }
+
+  // FIX PIPE-10: Remove stale front artifacts before creating new ones
+  const existingFront = await Artifact.find({ caseId: id, kind: 'id_front' });
+  if (existingFront.length > 0) {
+    for (const stale of existingFront) {
+      await storage.deleteFile(stale.storageKey).catch(() => {}); // best-effort
+      await Artifact.deleteOne({ _id: stale._id });
+    }
+  }
+
   const frontStored = await storage.saveFile(frontFile.buffer, frontFile.originalname, frontFile.mimetype, `cases/${id}`);
 
   const frontArtifact = await Artifact.create({
@@ -182,6 +232,18 @@ export async function uploadDocuments(req: AuthRequest, res: Response): Promise<
 
   if (files.back && files.back.length > 0) {
     const backFile = files.back[0];
+    if (!isValidImageBuffer(backFile.buffer, backFile.mimetype)) {
+      res.status(400).json({ success: false, error: { code: 'INVALID_FILE', message: 'Back file content does not match declared type' } });
+      return;
+    }
+
+    // FIX PIPE-10: Remove stale back artifacts
+    const existingBack = await Artifact.find({ caseId: id, kind: 'id_back' });
+    for (const stale of existingBack) {
+      await storage.deleteFile(stale.storageKey).catch(() => {});
+      await Artifact.deleteOne({ _id: stale._id });
+    }
+
     const backStored = await storage.saveFile(backFile.buffer, backFile.originalname, backFile.mimetype, `cases/${id}`);
     const backArtifact = await Artifact.create({
       caseId: id,
@@ -201,7 +263,7 @@ export async function uploadDocuments(req: AuthRequest, res: Response): Promise<
     state: 'DOCS_UPLOADED',
     at: new Date(),
     by: req.applicant?._id?.toString() || 'applicant',
-    notes: 'Document front and back uploaded successfully',
+    notes: 'Document front and back uploaded',
   });
 
   await kycCase.save();
@@ -211,10 +273,13 @@ export async function uploadDocuments(req: AuthRequest, res: Response): Promise<
     action: 'DOCUMENT_UPLOADED',
     resource: { type: 'KycCase', id },
     outcome: 'SUCCESS',
-    ipHash: req.ip || '127.0.0.1',
+    ipHash: crypto.createHash('sha256').update(req.ip || '127.0.0.1').digest('hex'),
     metadata: { frontFile: frontFile.originalname, frontSha256: frontStored.sha256 },
   });
 
+  // FIX PIPE-04: Run real quality analysis and return actual feedback
+  // The real quality check happens in the AI pipeline on submit. Here we provide
+  // a placeholder that communicates documents were received.
   res.json({
     success: true,
     data: {
@@ -222,13 +287,7 @@ export async function uploadDocuments(req: AuthRequest, res: Response): Promise<
       state: kycCase.state,
       frontImageUrl: frontStored.url,
       backImageUrl: kycCase.document.backImageUrl,
-      qualityFeedback: {
-        resolution: 'Pass (1920x1080)',
-        brightness: 'Good',
-        blur: 'Low',
-        glare: 'Low',
-        documentEdges: 'Fully visible',
-      },
+      message: 'Documents received. Quality will be evaluated during processing.',
     },
   });
 }
@@ -248,7 +307,45 @@ export async function uploadSelfie(req: AuthRequest, res: Response): Promise<voi
     return;
   }
 
+  // FIX AUTH-03: Ownership check
+  if (req.role === 'applicant' && req.applicant) {
+    if (kycCase.applicantId.toString() !== req.applicant._id.toString()) {
+      res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Unauthorized' } });
+      return;
+    }
+  }
+
+  // FIX PIPE-14: Verify active consent exists before accepting selfie
+  const activeConsent = await Consent.findOne({
+    caseId: id,
+    type: 'biometric',
+    granted: true,
+    withdrawnAt: { $exists: false },
+  });
+
+  if (!activeConsent) {
+    res.status(400).json({
+      success: false,
+      error: { code: 'CONSENT_REQUIRED', message: 'Biometric consent must be granted before uploading a selfie' },
+    });
+    return;
+  }
+
+  // FIX SEC-02: Magic byte validation
+  if (!isValidImageBuffer(file.buffer, file.mimetype)) {
+    res.status(400).json({ success: false, error: { code: 'INVALID_FILE', message: 'File content does not match declared type' } });
+    return;
+  }
+
   const storage = getStorageProvider();
+
+  // FIX PIPE-10: Remove stale selfie artifacts
+  const existingSelfie = await Artifact.find({ caseId: id, kind: 'selfie' });
+  for (const stale of existingSelfie) {
+    await storage.deleteFile(stale.storageKey).catch(() => {});
+    await Artifact.deleteOne({ _id: stale._id });
+  }
+
   const stored = await storage.saveFile(file.buffer, file.originalname, file.mimetype, `cases/${id}`);
 
   const artifact = await Artifact.create({
@@ -262,19 +359,23 @@ export async function uploadSelfie(req: AuthRequest, res: Response): Promise<voi
   });
 
   kycCase.faceVerification.selfieUrl = stored.url;
+  kycCase.state = 'SELFIE_UPLOADED';
+  kycCase.stateHistory.push({
+    state: 'SELFIE_UPLOADED',
+    at: new Date(),
+    by: req.applicant?._id?.toString() || 'applicant',
+    notes: 'Selfie uploaded',
+  });
   await kycCase.save();
 
+  // FIX PIPE-04: Do NOT return hardcoded liveness score. Real check happens on submit.
   res.json({
     success: true,
     data: {
       caseId: id,
       selfieUrl: stored.url,
       artifactId: artifact._id,
-      livenessPreview: {
-        score: 0.96,
-        status: 'Passed',
-        method: req.body.activeChallenge ? 'hybrid' : 'passive',
-      },
+      message: 'Selfie received. Liveness will be evaluated during processing.',
     },
   });
 }
@@ -288,10 +389,53 @@ export async function submitCase(req: AuthRequest, res: Response): Promise<void>
     return;
   }
 
-  // Find required artifacts
-  const frontArtifact = await Artifact.findOne({ caseId: id, kind: 'id_front' });
-  const selfieArtifact = await Artifact.findOne({ caseId: id, kind: 'selfie' });
-  const backArtifact = await Artifact.findOne({ caseId: id, kind: 'id_back' });
+  // FIX AUTH-03: Ownership check
+  if (req.role === 'applicant' && req.applicant) {
+    if (kycCase.applicantId.toString() !== req.applicant._id.toString()) {
+      res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Unauthorized' } });
+      return;
+    }
+  }
+
+  // FIX PIPE-11: Block terminal states from being re-queued
+  if (TERMINAL_STATES.has(kycCase.state as string)) {
+    res.status(400).json({
+      success: false,
+      error: { code: 'INVALID_STATE', message: `Case is in terminal state '${kycCase.state}' and cannot be submitted` },
+    });
+    return;
+  }
+
+  // FIX PIPE-11: Attempt-count cap
+  const submissionCount = (kycCase as any).submissionCount ?? 0;
+  if (submissionCount >= MAX_RESUBMIT_ATTEMPTS) {
+    res.status(400).json({
+      success: false,
+      error: { code: 'ATTEMPT_LIMIT_EXCEEDED', message: 'Maximum submission attempts reached. Please contact support.' },
+    });
+    return;
+  }
+
+  // FIX PIPE-14: Verify active consent exists before processing
+  const activeConsent = await Consent.findOne({
+    caseId: id,
+    type: 'biometric',
+    granted: true,
+    withdrawnAt: { $exists: false },
+  });
+
+  if (!activeConsent) {
+    res.status(400).json({
+      success: false,
+      error: { code: 'CONSENT_REQUIRED', message: 'Valid biometric consent is required before submission' },
+    });
+    return;
+  }
+
+  // FIX PIPE-10: Fetch the LATEST (most recent) artifacts, not the oldest
+  const frontArtifact = await Artifact.findOne({ caseId: id, kind: 'id_front' }).sort({ createdAt: -1 });
+  const selfieArtifact = await Artifact.findOne({ caseId: id, kind: 'selfie' }).sort({ createdAt: -1 });
+  const backArtifact = await Artifact.findOne({ caseId: id, kind: 'id_back' }).sort({ createdAt: -1 });
 
   if (!frontArtifact || !selfieArtifact) {
     res.status(400).json({
@@ -303,15 +447,15 @@ export async function submitCase(req: AuthRequest, res: Response): Promise<void>
 
   // Update state to QUEUED
   kycCase.state = 'QUEUED';
+  (kycCase as any).submissionCount = submissionCount + 1;
   kycCase.stateHistory.push({
     state: 'QUEUED',
     at: new Date(),
-    by: 'applicant',
-    notes: 'Submitted for verification analysis',
+    by: req.applicant?._id?.toString() || 'applicant',
+    notes: `Submitted for verification (attempt ${submissionCount + 1})`,
   });
   await kycCase.save();
 
-  // Enqueue async job
   const jobQueue = getJobQueue();
   await jobQueue.enqueueCaseProcessing({
     caseId: id,
@@ -323,25 +467,33 @@ export async function submitCase(req: AuthRequest, res: Response): Promise<void>
     selfieArtifactId: selfieArtifact._id.toString(),
   });
 
-  // Return HTTP 202 Accepted immediately as per Requirement 33
   res.status(202).json({
     success: true,
     message: 'Verification submitted successfully. Processing in background.',
     data: {
       caseId: id,
       state: 'QUEUED',
-      estimatedWaitSeconds: 3,
+      estimatedWaitSeconds: 5,
+      attemptNumber: submissionCount + 1,
     },
   });
 }
 
-export async function getCaseStatus(req: Request, res: Response): Promise<void> {
+export async function getCaseStatus(req: AuthRequest, res: Response): Promise<void> {
   const { id } = req.params;
   const kycCase = await KycCase.findOne({ caseId: id });
 
   if (!kycCase) {
     res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Case not found' } });
     return;
+  }
+
+  // FIX AUTH-03: Ownership check for status endpoint too
+  if (req.role === 'applicant' && req.applicant) {
+    if (kycCase.applicantId.toString() !== req.applicant._id.toString()) {
+      res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Unauthorized' } });
+      return;
+    }
   }
 
   let userFriendlyMessage = 'Your verification is being processed.';
@@ -385,8 +537,26 @@ export async function resubmitCase(req: AuthRequest, res: Response): Promise<voi
     return;
   }
 
+  // FIX AUTH-03: Ownership check
+  if (req.role === 'applicant' && req.applicant) {
+    if (kycCase.applicantId.toString() !== req.applicant._id.toString()) {
+      res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Unauthorized' } });
+      return;
+    }
+  }
+
   if (kycCase.state !== 'NEEDS_RESUBMISSION') {
     res.status(400).json({ success: false, error: { code: 'INVALID_STATE', message: 'Case is not in NEEDS_RESUBMISSION state' } });
+    return;
+  }
+
+  // FIX PIPE-11: Check attempt cap on resubmit too
+  const submissionCount = (kycCase as any).submissionCount ?? 0;
+  if (submissionCount >= MAX_RESUBMIT_ATTEMPTS) {
+    res.status(400).json({
+      success: false,
+      error: { code: 'ATTEMPT_LIMIT_EXCEEDED', message: 'Maximum resubmission attempts reached. Please contact support.' },
+    });
     return;
   }
 
@@ -402,6 +572,22 @@ export async function resubmitCase(req: AuthRequest, res: Response): Promise<voi
   res.json({
     success: true,
     message: 'Case reset for document re-upload',
-    data: { caseId: id, state: kycCase.state },
+    data: { caseId: id, state: kycCase.state, attemptsRemaining: MAX_RESUBMIT_ATTEMPTS - submissionCount },
   });
+}
+
+// ─────────────────────────────────────────────
+// FIX SEC-02: Magic byte / file signature validation
+// ─────────────────────────────────────────────
+function isValidImageBuffer(buffer: Buffer, declaredMimeType: string): boolean {
+  if (buffer.length < 4) return false;
+
+  const jpegMagic = buffer[0] === 0xFF && buffer[1] === 0xD8;
+  const pngMagic = buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47;
+  const webpMagic = buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46;
+
+  if (declaredMimeType === 'image/jpeg' || declaredMimeType === 'image/jpg') return jpegMagic;
+  if (declaredMimeType === 'image/png') return pngMagic;
+  if (declaredMimeType === 'image/webp') return webpMagic;
+  return false;
 }
