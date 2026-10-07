@@ -15,7 +15,8 @@ import { reviewService } from '../../services/review.service';
 import { useAuth } from '../../context/AuthContext';
 
 export const ReviewQueuePage: React.FC = () => {
-  const { user } = useAuth();
+  const { user, role } = useAuth();
+  const canReview = role === 'reviewer' || role === 'senior_reviewer';
   const [cases, setCases] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -253,7 +254,7 @@ export const ReviewQueuePage: React.FC = () => {
                         )}
                       </td>
                       <td className="px-5 py-3.5 text-right space-x-2">
-                        {c.assignedTo === 'Unassigned' && (
+                        {canReview && c.assignedTo === 'Unassigned' && (
                           <button
                             onClick={() => handleClaim(c.caseId)}
                             className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded text-[11px] transition-colors"
@@ -265,7 +266,7 @@ export const ReviewQueuePage: React.FC = () => {
                           to={`/staff/cases/${c.caseId}`}
                           className="px-3 py-1 bg-brand-600 hover:bg-brand-700 text-white font-semibold rounded text-[11px] transition-colors inline-block"
                         >
-                          Review &rarr;
+                          {canReview ? 'Review →' : 'View Case →'}
                         </Link>
                       </td>
                     </tr>

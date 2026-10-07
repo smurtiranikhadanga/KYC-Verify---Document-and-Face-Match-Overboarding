@@ -74,6 +74,10 @@ export const CaseDetailPage: React.FC = () => {
 
   const handleDecision = async (action: 'APPROVE' | 'REJECT' | 'RESUBMIT' | 'ESCALATE') => {
     if (!caseId) return;
+    if (role !== 'reviewer' && role !== 'senior_reviewer') {
+      alert('Access denied: Decisions can only be made by Reviewers or Senior Reviewers.');
+      return;
+    }
     setActionLoading(true);
     try {
       const res = await reviewService.decideCase(caseId, action, caseData?.riskFlags || [], actionNotes);
@@ -150,7 +154,8 @@ export const CaseDetailPage: React.FC = () => {
   const liveness = caseData.liveness || {};
   const tamper = doc.tamper || {};
   const quality = doc.quality || {};
-  const isSenior = role === 'senior_reviewer' || role === 'compliance_officer';
+  const isSenior = role === 'senior_reviewer';
+  const canMakeDecision = role === 'reviewer' || role === 'senior_reviewer';
 
   return (
     <div className="space-y-4">
@@ -628,66 +633,78 @@ export const CaseDetailPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Decision Action Console */}
-          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-3">
-            <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-              Reviewer Decision Actions
-            </h3>
+          {/* Decision Action Console — Restricted to Reviewers and Senior Reviewers */}
+          {canMakeDecision ? (
+            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-3">
+              <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                Reviewer Decision Actions
+              </h3>
 
-            <div>
-              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                Decision Notes / Reason Explanation
-              </label>
-              <textarea
-                rows={2}
-                placeholder="Optional decision notes for audit log..."
-                value={actionNotes}
-                onChange={(e) => setActionNotes(e.target.value)}
-                className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
-              />
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                  Decision Notes / Reason Explanation
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="Optional decision notes for audit log..."
+                  value={actionNotes}
+                  onChange={(e) => setActionNotes(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-xs font-semibold">
+                <button
+                  type="button"
+                  onClick={() => handleDecision('APPROVE')}
+                  disabled={actionLoading}
+                  className="py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors flex items-center justify-center space-x-1 shadow-xs"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Approve</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleDecision('REJECT')}
+                  disabled={actionLoading}
+                  className="py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors flex items-center justify-center space-x-1 shadow-xs"
+                >
+                  <XCircle className="w-3.5 h-3.5" />
+                  <span>Reject</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleDecision('RESUBMIT')}
+                  disabled={actionLoading}
+                  className="py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition-colors flex items-center justify-center space-x-1 shadow-xs"
+                >
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  <span>Resubmit</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleDecision('ESCALATE')}
+                  disabled={actionLoading}
+                  className="py-2.5 bg-slate-800 hover:bg-slate-900 text-white rounded-lg transition-colors flex items-center justify-center space-x-1 shadow-xs"
+                >
+                  <span>Escalate</span>
+                </button>
+              </div>
             </div>
-
-            <div className="grid grid-cols-2 gap-2 text-xs font-semibold">
-              <button
-                type="button"
-                onClick={() => handleDecision('APPROVE')}
-                disabled={actionLoading}
-                className="py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors flex items-center justify-center space-x-1 shadow-xs"
-              >
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>Approve</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleDecision('REJECT')}
-                disabled={actionLoading}
-                className="py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors flex items-center justify-center space-x-1 shadow-xs"
-              >
-                <XCircle className="w-3.5 h-3.5" />
-                <span>Reject</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleDecision('RESUBMIT')}
-                disabled={actionLoading}
-                className="py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition-colors flex items-center justify-center space-x-1 shadow-xs"
-              >
-                <AlertTriangle className="w-3.5 h-3.5" />
-                <span>Resubmit</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleDecision('ESCALATE')}
-                disabled={actionLoading}
-                className="py-2.5 bg-slate-800 hover:bg-slate-900 text-white rounded-lg transition-colors flex items-center justify-center space-x-1 shadow-xs"
-              >
-                <span>Escalate</span>
-              </button>
+          ) : (
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs space-y-1.5 shadow-xs">
+              <div className="flex items-center space-x-1.5 font-bold text-slate-700">
+                <Lock className="w-3.5 h-3.5 text-slate-500" />
+                <span>Decision Actions Restricted</span>
+              </div>
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                You are viewing this case in read-only audit mode as <strong className="capitalize">{role?.replace('_', ' ')}</strong>. Final KYC decisions (Approve, Reject, Resubmit, Escalate) can only be performed by active <strong>Reviewers</strong> and <strong>Senior Reviewers</strong>.
+              </p>
             </div>
-          </div>
+          )}
         </div>
       </div>
 
