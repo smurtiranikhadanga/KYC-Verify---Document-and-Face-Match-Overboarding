@@ -66,6 +66,9 @@ export interface IKycCase extends Document {
     confidence: number;
     selfieUrl?: string;
     croppedFaceUrl?: string;
+    error?: string;
+    verdict?: string;
+    feedback?: string;
   };
   liveness: {
     score: number;
@@ -194,6 +197,9 @@ const KycCaseSchema = new Schema<IKycCase>(
       confidence: { type: Number, default: 0.94 },
       selfieUrl: { type: String },
       croppedFaceUrl: { type: String },
+      error: { type: String },
+      verdict: { type: String },
+      feedback: { type: String },
     },
     liveness: {
       score: { type: Number, default: 0.95 },

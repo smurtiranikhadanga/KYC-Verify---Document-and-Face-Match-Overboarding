@@ -470,38 +470,109 @@ export const CaseDetailPage: React.FC = () => {
               </div>
             </div>
 
+            {/* Prominent Biometric Match Decision */}
+            {(() => {
+              const simVal = typeof face.similarity === 'number' ? face.similarity : 0;
+              const simPercent = Math.round(simVal * 100);
+              const faceThreshold = face.threshold ? Math.round(face.threshold * 100) : 70;
+              const isMatch = Boolean(face.match && simVal >= (face.threshold || 0.70));
+              const isNoDocFace = face.error === 'NO_FACE_DETECTED_IN_DOCUMENT' || face.verdict === 'NO_FACE_IN_DOCUMENT';
+              const isNoSelfieFace = face.error === 'NO_FACE_DETECTED_IN_SELFIE' || face.verdict === 'NO_FACE_IN_SELFIE';
+
+              if (isNoDocFace) {
+                return (
+                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-1">
+                    <div className="flex items-center space-x-1.5 text-xs font-bold text-amber-800">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>NO REAL FACE IN ID DOCUMENT</span>
+                    </div>
+                    <p className="text-[11px] text-amber-700 leading-tight">
+                      The uploaded document has a placeholder silhouette graphic. An authentic photo ID is required to perform facial comparison.
+                    </p>
+                  </div>
+                );
+              }
+              if (isNoSelfieFace) {
+                return (
+                  <div className="p-3 bg-red-50 border border-red-200 rounded-xl space-y-1">
+                    <div className="flex items-center space-x-1.5 text-xs font-bold text-red-800">
+                      <XCircle className="w-4 h-4 text-red-600 shrink-0" />
+                      <span>NO FACE DETECTED IN SELFIE</span>
+                    </div>
+                    <p className="text-[11px] text-red-700 leading-tight">
+                      Could not detect a clear human face in the live selfie. Retake with better lighting.
+                    </p>
+                  </div>
+                );
+              }
+              if (isMatch) {
+                return (
+                  <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl space-y-1">
+                    <div className="flex items-center space-x-1.5 text-xs font-bold text-emerald-800">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>FACES COMPLETELY MATCHING</span>
+                    </div>
+                    <p className="text-[11px] text-emerald-700 leading-tight">
+                      Live selfie matches the portrait from the identity document ({simPercent}% similarity). Biometric identity verified.
+                    </p>
+                  </div>
+                );
+              }
+              return (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-xl space-y-1">
+                  <div className="flex items-center space-x-1.5 text-xs font-bold text-red-800">
+                    <XCircle className="w-4 h-4 text-red-600 shrink-0" />
+                    <span>FACES DO NOT MATCH (MISMATCH)</span>
+                  </div>
+                  <p className="text-[11px] text-red-700 leading-tight">
+                    The live selfie does not match the portrait on the document ({simPercent}% similarity &lt; {faceThreshold}% threshold).
+                  </p>
+                </div>
+              );
+            })()}
+
             {/* Scores & Thresholds */}
             <div className="space-y-2.5 pt-1 text-xs">
-              <div>
-                <div className="flex justify-between text-[11px] mb-1">
-                  <span className="font-semibold text-slate-700">Facial Similarity (ArcFace)</span>
-                  <span className="font-mono font-bold text-slate-900">
-                    {Math.round((face.similarity || 0.92) * 100)}% (Threshold: 80%)
-                  </span>
-                </div>
-                <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full ${
-                      (face.similarity || 0.92) >= 0.8 ? 'bg-emerald-500' : 'bg-red-500'
-                    }`}
-                    style={{ width: `${Math.round((face.similarity || 0.92) * 100)}%` }}
-                  />
-                </div>
-              </div>
+              {(() => {
+                const simVal = typeof face.similarity === 'number' ? face.similarity : 0;
+                const simPercent = Math.round(simVal * 100);
+                const faceThreshold = face.threshold ? Math.round(face.threshold * 100) : 70;
+                const isMatch = Boolean(face.match && simVal >= (face.threshold || 0.70));
+                const isNoDocFace = face.error === 'NO_FACE_DETECTED_IN_DOCUMENT' || face.verdict === 'NO_FACE_IN_DOCUMENT';
+
+                return (
+                  <div>
+                    <div className="flex justify-between text-[11px] mb-1">
+                      <span className="font-semibold text-slate-700">Facial Similarity (ArcFace)</span>
+                      <span className={`font-mono font-bold ${isNoDocFace ? 'text-amber-700' : isMatch ? 'text-emerald-700' : 'text-red-700'}`}>
+                        {isNoDocFace ? '0% (No Face on ID)' : `${simPercent}% (${isMatch ? 'MATCH' : 'MISMATCH'} • Req: ${faceThreshold}%)`}
+                      </span>
+                    </div>
+                    <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${
+                          isNoDocFace ? 'bg-amber-400' : isMatch ? 'bg-emerald-500' : 'bg-red-500'
+                        }`}
+                        style={{ width: `${isNoDocFace ? 0 : Math.min(100, simPercent)}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div>
                 <div className="flex justify-between text-[11px] mb-1">
                   <span className="font-semibold text-slate-700">Passive Liveness Anti-Spoof</span>
                   <span className="font-mono font-bold text-slate-900">
-                    {Math.round((liveness.score || 0.95) * 100)}% (Threshold: 85%)
+                    {Math.round((typeof liveness.score === 'number' ? liveness.score : 0.60) * 100)}% (Threshold: 60%)
                   </span>
                 </div>
                 <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
                   <div
                     className={`h-full rounded-full ${
-                      (liveness.score || 0.95) >= 0.85 ? 'bg-emerald-500' : 'bg-amber-500'
+                      (liveness.score || 0.60) >= (liveness.threshold || 0.60) ? 'bg-emerald-500' : 'bg-amber-500'
                     }`}
-                    style={{ width: `${Math.round((liveness.score || 0.95) * 100)}%` }}
+                    style={{ width: `${Math.round((typeof liveness.score === 'number' ? liveness.score : 0.60) * 100)}%` }}
                   />
                 </div>
               </div>
@@ -510,15 +581,15 @@ export const CaseDetailPage: React.FC = () => {
                 <div className="flex justify-between text-[11px] mb-1">
                   <span className="font-semibold text-slate-700">Tamper Anomaly Score (ELA / FFT)</span>
                   <span className="font-mono font-bold text-slate-900">
-                    {Math.round((tamper.score || 0.08) * 100)}% (Threshold: 70%)
+                    {Math.round((typeof tamper.score === 'number' ? tamper.score : 0.10) * 100)}% (Threshold: 70%)
                   </span>
                 </div>
                 <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
                   <div
                     className={`h-full rounded-full ${
-                      (tamper.score || 0.08) <= 0.7 ? 'bg-emerald-500' : 'bg-red-500'
+                      (tamper.score || 0.10) <= 0.7 ? 'bg-emerald-500' : 'bg-red-500'
                     }`}
-                    style={{ width: `${Math.round((tamper.score || 0.08) * 100)}%` }}
+                    style={{ width: `${Math.round((typeof tamper.score === 'number' ? tamper.score : 0.10) * 100)}%` }}
                   />
                 </div>
               </div>

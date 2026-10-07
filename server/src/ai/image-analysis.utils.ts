@@ -343,3 +343,29 @@ function isSkinTone(r: number, g: number, b: number): boolean {
 
   return (ruleRGB && ruleNorm) || ruleYCbCr;
 }
+
+/**
+ * Automatically extracts and crops the portrait photo region from an ID card or passport front.
+ * Uses standard ICAO / ISO document layout ratios (photo is on the left side).
+ */
+export async function extractPortraitFromDocument(buffer: Buffer): Promise<Buffer> {
+  try {
+    const image = sharp(buffer);
+    const meta = await image.metadata();
+    const w = meta.width || 800;
+    const h = meta.height || 600;
+
+    // In passports & identity cards, the photo is standardly on the left 3% to 40%
+    const cropLeft = Math.max(0, Math.round(w * 0.03));
+    const cropTop = Math.max(0, Math.round(h * 0.18));
+    const cropWidth = Math.min(w - cropLeft, Math.round(w * 0.38));
+    const cropHeight = Math.min(h - cropTop, Math.round(h * 0.58));
+
+    return await image
+      .extract({ left: cropLeft, top: cropTop, width: cropWidth, height: cropHeight })
+      .jpeg({ quality: 90 })
+      .toBuffer();
+  } catch {
+    return buffer;
+  }
+}

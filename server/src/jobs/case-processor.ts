@@ -230,12 +230,35 @@ export async function processCaseJob(data: ProcessCaseJobData): Promise<void> {
     freshCase.document.validation = aiOutput.validation;
     freshCase.document.tamper = aiOutput.tamper;
     freshCase.document.quality = aiOutput.quality;
+    // Extract real portrait face crop from front document
+    let croppedFaceUrl = storage.getFileUrl(frontArtifact.storageKey);
+    try {
+      const { extractPortraitFromDocument } = await import('../ai/image-analysis.utils.js');
+      const croppedFaceBuffer = await extractPortraitFromDocument(frontBuffer);
+      const croppedStored = await storage.saveFile(
+        croppedFaceBuffer,
+        `face_crop_${caseId}.jpg`,
+        'image/jpeg',
+        `cases/${caseId}`
+      );
+      await Artifact.create({
+        caseId,
+        kind: 'id_face',
+        storageKey: croppedStored.storageKey,
+        fileName: `face_crop_${caseId}.jpg`,
+        mimeType: 'image/jpeg',
+        sizeBytes: croppedStored.sizeBytes,
+        sha256: croppedStored.sha256,
+      });
+      croppedFaceUrl = storage.getFileUrl(croppedStored.storageKey);
+    } catch (err: any) {
+      console.warn(`[JobQueue] Failed to extract face crop for ${caseId}:`, err.message);
+    }
+
     freshCase.faceVerification = {
       ...aiOutput.face,
       selfieUrl: storage.getFileUrl(selfieArtifact.storageKey),
-      // FIX PIPE-01: croppedFaceUrl is the ID front (honest about what it is)
-      // In production this should be the actually cropped face region from the ID
-      croppedFaceUrl: storage.getFileUrl(frontArtifact.storageKey),
+      croppedFaceUrl,
     };
     freshCase.liveness = aiOutput.liveness;
     freshCase.riskScore = aiOutput.riskScore;

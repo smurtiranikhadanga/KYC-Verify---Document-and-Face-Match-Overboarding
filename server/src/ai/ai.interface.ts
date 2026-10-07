@@ -22,6 +22,9 @@ export interface FaceVerificationResult {
   match: boolean;
   confidence: number;
   latencyMs: number;
+  error?: string;
+  verdict?: 'COMPLETELY_MATCHING' | 'NOT_MATCHING' | 'NO_FACE_IN_DOCUMENT' | 'NO_FACE_IN_SELFIE';
+  feedback?: string;
 }
 
 export interface LivenessResult {
