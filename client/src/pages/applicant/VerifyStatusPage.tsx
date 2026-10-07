@@ -106,17 +106,59 @@ export const VerifyStatusPage: React.FC = () => {
   const isProcessing = state === 'QUEUED' || state === 'PROCESSING' || state === 'DOCS_UPLOADED';
 
   // Stepper state computation
-  const stepItems = [
-    { label: 'Verification Started', done: true },
-    { label: 'Consent Received', done: true },
-    { label: 'Documents Uploaded', done: true },
-    { label: 'Verification Processing', done: !isProcessing, active: isProcessing },
+  type StepStatus = 'done' | 'active' | 'warning' | 'danger' | 'pending';
+
+  interface StepItem {
+    label: string;
+    status: StepStatus;
+    icon?: React.ReactNode;
+  }
+
+  const getStep5 = (): { label: string; status: StepStatus; icon?: React.ReactNode } => {
+    if (isApproved) {
+      return { label: 'Approved', status: 'done', icon: <CheckCircle2 className="w-4 h-4" /> };
+    }
+    if (isRejected) {
+      return { label: 'Rejected', status: 'danger', icon: <XCircle className="w-4 h-4" /> };
+    }
+    if (isManualReview) {
+      return { label: 'Manual Review', status: 'warning', icon: <Clock className="w-4 h-4" /> };
+    }
+    if (isNeedsResubmission) {
+      return { label: 'Action Needed', status: 'warning', icon: <AlertTriangle className="w-4 h-4" /> };
+    }
+    return { label: 'Decision Result', status: 'pending' };
+  };
+
+  const step5 = getStep5();
+
+  const stepItems: StepItem[] = [
+    { label: 'Verification Started', status: 'done', icon: <CheckCircle2 className="w-4 h-4" /> },
+    { label: 'Consent Received', status: 'done', icon: <CheckCircle2 className="w-4 h-4" /> },
+    { label: 'Documents Uploaded', status: 'done', icon: <CheckCircle2 className="w-4 h-4" /> },
     {
-      label: 'Decision Result',
-      done: isApproved || isRejected || isManualReview || isNeedsResubmission,
-      active: !isProcessing,
+      label: 'Verification Processing',
+      status: isProcessing ? 'active' : 'done',
+      icon: isProcessing ? undefined : <CheckCircle2 className="w-4 h-4" />,
     },
+    step5,
   ];
+
+  const getCircleStyles = (status: StepStatus) => {
+    switch (status) {
+      case 'done':
+        return 'bg-emerald-600 text-white shadow-xs';
+      case 'active':
+        return 'bg-brand-600 text-white ring-4 ring-brand-100 animate-pulse';
+      case 'warning':
+        return 'bg-amber-500 text-white ring-4 ring-amber-100 animate-pulse';
+      case 'danger':
+        return 'bg-rose-600 text-white shadow-xs';
+      case 'pending':
+      default:
+        return 'bg-slate-200 text-slate-500';
+    }
+  };
 
   return (
     <div className="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 shadow-sm space-y-8">
@@ -138,15 +180,11 @@ export const VerifyStatusPage: React.FC = () => {
             <React.Fragment key={idx}>
               <div className="flex flex-col items-center">
                 <div
-                  className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
-                    step.done
-                      ? 'bg-emerald-600 text-white shadow-xs'
-                      : step.active
-                      ? 'bg-brand-600 text-white ring-4 ring-brand-100 animate-pulse'
-                      : 'bg-slate-200 text-slate-500'
-                  }`}
+                  className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all ${getCircleStyles(
+                    step.status
+                  )}`}
                 >
-                  {step.done ? <CheckCircle2 className="w-4 h-4" /> : idx + 1}
+                  {step.icon || idx + 1}
                 </div>
                 <span className="text-[10px] text-slate-500 font-medium mt-1 text-center hidden sm:block max-w-[80px]">
                   {step.label}
@@ -155,7 +193,13 @@ export const VerifyStatusPage: React.FC = () => {
               {idx < stepItems.length - 1 && (
                 <div
                   className={`flex-1 h-0.5 mx-1 transition-all ${
-                    step.done ? 'bg-emerald-500' : 'bg-slate-200'
+                    stepItems[idx + 1].status === 'warning'
+                      ? 'bg-amber-300'
+                      : stepItems[idx + 1].status === 'danger'
+                      ? 'bg-rose-300'
+                      : step.status === 'done'
+                      ? 'bg-emerald-500'
+                      : 'bg-slate-200'
                   }`}
                 />
               )}
@@ -237,14 +281,29 @@ export const VerifyStatusPage: React.FC = () => {
             <div className="p-3 bg-white/80 rounded-xl border border-amber-200/80 max-w-md mx-auto text-xs text-amber-800">
               SLA Guarantee: Standard review turnaround &le; 2 hours. You do not need to resubmit.
             </div>
-            <div className="pt-2">
+            <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
               <button
                 onClick={fetchStatus}
-                className="px-5 py-2 bg-slate-900 text-white text-xs font-semibold rounded-lg hover:bg-slate-800 transition-colors inline-flex items-center space-x-1.5"
+                className="px-5 py-2 bg-slate-900 text-white text-xs font-semibold rounded-lg hover:bg-slate-800 transition-colors inline-flex items-center space-x-1.5 shadow-xs"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
                 <span>Refresh Status</span>
               </button>
+              <button
+                onClick={handleResubmit}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold rounded-lg transition-colors inline-flex items-center space-x-1.5 shadow-xs"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Re-upload Documents</span>
+              </button>
+              <Link
+                to="/staff/login"
+                target="_blank"
+                className="px-4 py-2 bg-white border border-amber-300 text-amber-900 text-xs font-semibold rounded-lg hover:bg-amber-100/70 transition-colors inline-flex items-center space-x-1.5 shadow-xs"
+              >
+                <span>Staff Review Portal</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
             </div>
           </div>
         )}

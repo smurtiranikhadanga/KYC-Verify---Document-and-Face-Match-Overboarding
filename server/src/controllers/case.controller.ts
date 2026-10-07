@@ -4,6 +4,7 @@ import { KycCase } from '../models/case.model.js';
 import { Applicant } from '../models/applicant.model.js';
 import { Artifact } from '../models/artifact.model.js';
 import { Consent } from '../models/consent.model.js';
+import { ReviewTask } from '../models/review-task.model.js';
 import { getStorageProvider } from '../storage/index.js';
 import { getJobQueue } from '../jobs/index.js';
 import { createAuditEntry } from '../models/audit-log.model.js';
@@ -17,7 +18,7 @@ const MAX_RESUBMIT_ATTEMPTS = 3;
 // Terminal states that cannot be re-queued (FIX PIPE-11)
 const TERMINAL_STATES = new Set(['AUTO_APPROVED', 'APPROVED', 'ERASED', 'ARCHIVED']);
 // States that allow submission
-const SUBMITTABLE_STATES = new Set(['DOCS_UPLOADED', 'SELFIE_UPLOADED', 'CREATED', 'CONSENTED']);
+const SUBMITTABLE_STATES = new Set(['DOCS_UPLOADED', 'SELFIE_UPLOADED', 'CREATED', 'CONSENTED', 'MANUAL_REVIEW']);
 
 export async function createCase(req: AuthRequest, res: Response): Promise<void> {
   const parsed = CreateCaseSchema.safeParse(req.body);
@@ -215,9 +216,14 @@ export async function uploadDocuments(req: AuthRequest, res: Response): Promise<
     return;
   }
   
-  if (!SUBMITTABLE_STATES.has(kycCase.state as string) && kycCase.state !== 'NEEDS_RESUBMISSION') {
+  if (!SUBMITTABLE_STATES.has(kycCase.state as string) && kycCase.state !== 'NEEDS_RESUBMISSION' && kycCase.state !== 'MANUAL_REVIEW') {
     res.status(400).json({ success: false, error: { code: 'INVALID_STATE', message: `Cannot upload documents in state '${kycCase.state}'` } });
     return;
+  }
+
+  // If case was in MANUAL_REVIEW, remove any pending review tasks
+  if (kycCase.state === 'MANUAL_REVIEW') {
+    await ReviewTask.deleteMany({ caseId: id, status: 'PENDING' });
   }
 
   // FIX AUTH-03: Ownership check
@@ -342,7 +348,7 @@ export async function uploadSelfie(req: AuthRequest, res: Response): Promise<voi
     return;
   }
   
-  if (!SUBMITTABLE_STATES.has(kycCase.state as string) && kycCase.state !== 'NEEDS_RESUBMISSION') {
+  if (!SUBMITTABLE_STATES.has(kycCase.state as string) && kycCase.state !== 'NEEDS_RESUBMISSION' && kycCase.state !== 'MANUAL_REVIEW') {
     res.status(400).json({ success: false, error: { code: 'INVALID_STATE', message: `Cannot upload selfie in state '${kycCase.state}'` } });
     return;
   }
@@ -581,7 +587,7 @@ export async function getCaseStatus(req: AuthRequest, res: Response): Promise<vo
       message: userFriendlyMessage,
       explanation,
       updatedAt: kycCase.updatedAt,
-      resubmissionAllowed: kycCase.state === 'NEEDS_RESUBMISSION',
+      resubmissionAllowed: kycCase.state === 'NEEDS_RESUBMISSION' || kycCase.state === 'MANUAL_REVIEW',
       documentType: kycCase.documentType,
       jurisdiction: kycCase.jurisdiction,
     },
@@ -605,10 +611,13 @@ export async function resubmitCase(req: AuthRequest, res: Response): Promise<voi
     }
   }
 
-  if (kycCase.state !== 'NEEDS_RESUBMISSION') {
-    res.status(400).json({ success: false, error: { code: 'INVALID_STATE', message: 'Case is not in NEEDS_RESUBMISSION state' } });
+  if (kycCase.state !== 'NEEDS_RESUBMISSION' && kycCase.state !== 'MANUAL_REVIEW') {
+    res.status(400).json({ success: false, error: { code: 'INVALID_STATE', message: 'Case is not in a resubmittable state' } });
     return;
   }
+
+  // Remove any pending manual review tasks
+  await ReviewTask.deleteMany({ caseId: id, status: 'PENDING' });
 
   // FIX PIPE-11: Check attempt cap on resubmit too
   const submissionCount = (kycCase as any).submissionCount ?? 0;
