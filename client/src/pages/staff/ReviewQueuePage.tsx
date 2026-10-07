@@ -26,8 +26,8 @@ export const ReviewQueuePage: React.FC = () => {
   const [docTypeFilter, setDocTypeFilter] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
 
-  const fetchQueue = async () => {
-    setLoading(true);
+  const fetchQueue = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const res = await reviewService.getQueue({
         status: statusFilter || undefined,
@@ -42,12 +42,16 @@ export const ReviewQueuePage: React.FC = () => {
     } catch (err) {
       console.error('Failed to load review queue:', err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchQueue();
+    fetchQueue(false);
+    const interval = setInterval(() => {
+      fetchQueue(true);
+    }, 4000);
+    return () => clearInterval(interval);
   }, [statusFilter, riskFilter, jurisdictionFilter, docTypeFilter]);
 
   const handleClaim = async (caseId: string) => {
