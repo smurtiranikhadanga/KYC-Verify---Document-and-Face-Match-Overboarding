@@ -76,7 +76,7 @@ export const ReviewQueuePage: React.FC = () => {
         </div>
 
         <button
-          onClick={fetchQueue}
+          onClick={() => fetchQueue()}
           className="px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg transition-colors inline-flex items-center space-x-1.5 shadow-xs"
         >
           <RefreshCw className="w-3.5 h-3.5" />
