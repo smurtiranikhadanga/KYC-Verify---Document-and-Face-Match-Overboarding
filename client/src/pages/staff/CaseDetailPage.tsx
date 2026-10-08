@@ -479,8 +479,8 @@ export const CaseDetailPage: React.FC = () => {
             {(() => {
               const simVal = typeof face.similarity === 'number' ? face.similarity : 0;
               const simPercent = Math.round(simVal * 100);
-              const faceThreshold = face.threshold ? Math.round(face.threshold * 100) : 70;
-              const isMatch = Boolean(face.match && simVal >= (face.threshold || 0.70));
+              const faceThreshold = face.threshold ? Math.round(face.threshold * 100) : 55;
+              const isMatch = Boolean(face.match && simVal >= (face.threshold ?? 0.55));
               const isNoDocFace = face.error === 'NO_FACE_DETECTED_IN_DOCUMENT' || face.verdict === 'NO_FACE_IN_DOCUMENT';
               const isNoSelfieFace = face.error === 'NO_FACE_DETECTED_IN_SELFIE' || face.verdict === 'NO_FACE_IN_SELFIE';
 
@@ -541,8 +541,8 @@ export const CaseDetailPage: React.FC = () => {
               {(() => {
                 const simVal = typeof face.similarity === 'number' ? face.similarity : 0;
                 const simPercent = Math.round(simVal * 100);
-                const faceThreshold = face.threshold ? Math.round(face.threshold * 100) : 70;
-                const isMatch = Boolean(face.match && simVal >= (face.threshold || 0.70));
+                const faceThreshold = face.threshold ? Math.round(face.threshold * 100) : 55;
+                const isMatch = Boolean(face.match && simVal >= (face.threshold ?? 0.55));
                 const isNoDocFace = face.error === 'NO_FACE_DETECTED_IN_DOCUMENT' || face.verdict === 'NO_FACE_IN_DOCUMENT';
 
                 return (

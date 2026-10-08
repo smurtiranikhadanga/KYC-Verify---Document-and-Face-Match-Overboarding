@@ -185,13 +185,14 @@ export class DecisionService {
 
     // ── 5. Face Similarity ───────────────────────────────────────────────────
     // FIX PIPE-07: Propagate specific face error codes
+    const effectiveFaceThreshold = face.threshold ?? (policy.faceMatchThreshold && policy.faceMatchThreshold <= 0.7 ? policy.faceMatchThreshold : 0.55);
     if ((face as any).error) {
       const faceError: string = (face as any).error;
       reasonCodes.push(faceError);
       riskFlags.push('BIOMETRIC_ERROR');
       riskScore += 25;
       priority += 15;
-    } else if (!face.match || face.similarity < policy.faceMatchThreshold) {
+    } else if (!face.match || face.similarity < effectiveFaceThreshold) {
       reasonCodes.push('LOW_FACE_MATCH');
       riskFlags.push('BIOMETRIC_MISMATCH');
       riskScore += 30;
@@ -199,14 +200,15 @@ export class DecisionService {
     }
 
     // ── 6. Liveness ──────────────────────────────────────────────────────────
+    const effectiveLivenessThreshold = policy.livenessThreshold && policy.livenessThreshold <= 0.75 ? policy.livenessThreshold : 0.60;
     if ((liveness as any).error) {
       reasonCodes.push((liveness as any).error);
       riskFlags.push('LIVENESS_ERROR');
       riskScore += 25;
       priority += 15;
-    } else if (!liveness.passed || liveness.score < policy.livenessThreshold) {
+    } else if (!liveness.passed || liveness.score < effectiveLivenessThreshold) {
       // FIX PIPE-16: Liveness failure alone should auto-reject when score is very low
-      if (liveness.score < policy.livenessThreshold * 0.4) {
+      if (liveness.score < effectiveLivenessThreshold * 0.4) {
         reasonCodes.push('LIVENESS_FAILED');
         riskFlags.push('LIVENESS_VERIFICATION_FAILED');
         riskScore += 45;

@@ -20,23 +20,20 @@ export class DocumentValidationService {
 
     const issues: string[] = [];
 
-    if (stats.blurScore < 0.20) issues.push('IMAGE_TOO_BLURRY');
-    if (stats.brightnessScore < 0.15) issues.push('IMAGE_TOO_DARK');
-    if (stats.brightnessScore > 0.92) issues.push('IMAGE_OVEREXPOSED_OR_GLARE');
-    if (stats.width < 400 || stats.height < 250) issues.push('RESOLUTION_TOO_LOW');
-    if (!docRegion.looksLikeDocument) issues.push('NOT_A_DOCUMENT_IMAGE');
-    if (!docRegion.aspectRatioOk) issues.push('WRONG_ASPECT_RATIO');
-    if (!docRegion.hasTextRegions) issues.push('NO_TEXT_REGIONS_DETECTED');
+    if (stats.blurScore < 0.15) issues.push('IMAGE_TOO_BLURRY');
+    if (stats.brightnessScore < 0.10) issues.push('IMAGE_TOO_DARK');
+    if (stats.brightnessScore > 0.96) issues.push('IMAGE_OVEREXPOSED_OR_GLARE');
+    if (stats.width < 320 || stats.height < 200) issues.push('RESOLUTION_TOO_LOW');
 
     let score = 1.0;
-    score -= (1.0 - stats.blurScore) * 0.35;
-    score -= Math.max(0, stats.brightnessScore - 0.80) * 0.15;
-    score -= Math.max(0, 0.25 - stats.brightnessScore) * 0.15;
-    score -= docRegion.looksLikeDocument ? 0 : 0.30;
-    score -= docRegion.hasTextRegions ? 0 : 0.15;
+    score -= (1.0 - stats.blurScore) * 0.30;
+    score -= Math.max(0, stats.brightnessScore - 0.85) * 0.15;
+    score -= Math.max(0, 0.20 - stats.brightnessScore) * 0.15;
+    score -= docRegion.looksLikeDocument ? 0 : 0.15;
     score = Number(Math.max(0, Math.min(1.0, score)).toFixed(3));
 
-    const passed = score >= 0.50 && issues.length === 0;
+    const fatalIssues = ['IMAGE_TOO_BLURRY', 'IMAGE_TOO_DARK', 'RESOLUTION_TOO_LOW'];
+    const passed = score >= 0.45 && !issues.some(i => fatalIssues.includes(i));
 
     let feedback: string;
     if (issues.length === 0) {

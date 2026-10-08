@@ -46,8 +46,8 @@ export async function analyzeImage(buffer: Buffer): Promise<ImageStats> {
     // --- Blur Detection via Laplacian Variance ---
     // The Laplacian operator highlights edges; high variance = sharp image
     const lapVariance = computeLaplacianVariance(grayBuffer, 256, 256);
-    // Normalize: variance < 50 = blurry, > 500 = sharp
-    const blurScore = Math.min(1.0, Math.max(0, lapVariance / 500));
+    // Normalize: true variance < 40 = blurry, > 180 = crystal sharp
+    const blurScore = Math.min(1.0, Math.max(0, lapVariance / 180));
 
     // --- Brightness Analysis ---
     const { mean: brightnessMean, std: brightnessStd } = computeStats(grayBuffer);
@@ -264,7 +264,7 @@ function computeLaplacianVariance(grayData: Buffer, w: number, h: number): numbe
       count++;
     }
   }
-  return count > 0 ? Math.sqrt(sumSq / count) : 0;
+  return count > 0 ? (sumSq / count) : 0;
 }
 
 function computeStats(data: Buffer): { mean: number; std: number } {
@@ -369,27 +369,197 @@ function isSkinTone(r: number, g: number, b: number): boolean {
 }
 
 /**
- * Automatically extracts and crops the portrait photo region from an ID card or passport front.
- * Uses standard ICAO / ISO document layout ratios (photo is on the left side).
+ * Automatically detects and extracts the portrait photo region from an ID card,
+ * passport, or directly uploaded applicant photograph.
+ * Intelligently identifies whether the image is a direct portrait photo (centered face)
+ * or a credential document (with photo box on the left, right, or center).
  */
 export async function extractPortraitFromDocument(buffer: Buffer): Promise<Buffer> {
   try {
-    const image = sharp(buffer);
+    const image = sharp(buffer, { failOnError: false } as any);
+    const meta = await image.metadata();
+    const w = meta.width || 800;
+    const h = meta.height || 600;
+    const aspectRatio = w / h;
+
+    // Analysis grid for fast skin & facial geometry mapping
+    const gridW = 128;
+    const gridH = Math.round((h / w) * gridW);
+
+    const { data } = await sharp(buffer, { failOnError: false } as any)
+      .resize(gridW, gridH, { fit: 'fill' })
+      .toColorspace('srgb')
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    let totalSkin = 0;
+    let skinXSum = 0;
+    let minSkinX = gridW, maxSkinX = 0;
+    let minSkinY = gridH, maxSkinY = 0;
+    const rowSkinCounts = new Int32Array(gridH);
+    const colSkinCounts = new Int32Array(gridW);
+
+    for (let y = 0; y < gridH; y++) {
+      for (let x = 0; x < gridW; x++) {
+        const idx = (y * gridW + x) * 3;
+        if (isSkinTone(data[idx], data[idx + 1], data[idx + 2])) {
+          totalSkin++;
+          skinXSum += x;
+          rowSkinCounts[y]++;
+          colSkinCounts[x]++;
+          if (x < minSkinX) minSkinX = x;
+          if (x > maxSkinX) maxSkinX = x;
+          if (y < minSkinY) minSkinY = y;
+          if (y > maxSkinY) maxSkinY = y;
+        }
+      }
+    }
+
+    const skinRatio = totalSkin / (gridW * gridH);
+    // Direct portrait: vertical orientation or significant skin presence
+    const isDirectPortrait = aspectRatio < 1.05 || skinRatio > 0.16;
+
+    let cropX = 0;
+    let cropY = 0;
+    let cropW = w;
+    let cropH = h;
+
+    if (isDirectPortrait) {
+      // Find top of head / forehead
+      let topHeadY = minSkinY;
+      for (let y = 0; y < gridH; y++) {
+        if (rowSkinCounts[y] > gridW * 0.08) {
+          topHeadY = y;
+          break;
+        }
+      }
+
+      const centerX = totalSkin > 0 ? (skinXSum / totalSkin) / gridW * w : w / 2;
+      const faceTopPx = (topHeadY / gridH) * h;
+      const faceWidthPx = Math.min(w * 0.90, Math.max(w * 0.50, ((maxSkinX - minSkinX) / gridW) * w * 1.15));
+      const faceHeightPx = faceWidthPx * 1.25;
+
+      cropW = Math.round(faceWidthPx);
+      cropH = Math.round(faceHeightPx);
+      cropX = Math.max(0, Math.min(w - cropW, Math.round(centerX - cropW / 2)));
+      cropY = Math.max(0, Math.min(h - cropH, Math.round(Math.max(0, faceTopPx - cropH * 0.15))));
+    } else {
+      // Credential document: Check if photo is on the left, right, or center
+      let leftSkin = 0, rightSkin = 0;
+      for (let x = 0; x < gridW / 2; x++) leftSkin += colSkinCounts[x];
+      for (let x = Math.round(gridW / 2); x < gridW; x++) rightSkin += colSkinCounts[x];
+
+      if (leftSkin > rightSkin * 1.25) {
+        // Standard ICAO passport / ID with left-side photo
+        cropX = Math.round(w * 0.03);
+        cropY = Math.round(h * 0.10);
+        cropW = Math.round(w * 0.44);
+        cropH = Math.round(h * 0.72);
+      } else if (rightSkin > leftSkin * 1.25) {
+        // Right-side photo (some national IDs)
+        cropX = Math.round(w * 0.53);
+        cropY = Math.round(h * 0.10);
+        cropW = Math.round(w * 0.44);
+        cropH = Math.round(h * 0.72);
+      } else {
+        // Center-oriented document photo
+        cropX = Math.round(w * 0.22);
+        cropY = Math.round(h * 0.10);
+        cropW = Math.round(w * 0.56);
+        cropH = Math.round(h * 0.75);
+      }
+    }
+
+    cropX = Math.max(0, Math.min(w - 10, cropX));
+    cropY = Math.max(0, Math.min(h - 10, cropY));
+    cropW = Math.min(w - cropX, Math.max(50, cropW));
+    cropH = Math.min(h - cropY, Math.max(50, cropH));
+
+    return await sharp(buffer, { failOnError: false } as any)
+      .extract({ left: cropX, top: cropY, width: cropW, height: cropH })
+      .jpeg({ quality: 90 })
+      .toBuffer();
+  } catch (err: any) {
+    console.warn('[ImageAnalysis] Falling back to default extract:', err.message);
+    return buffer;
+  }
+}
+
+/**
+ * Extracts the primary human face region from a live selfie photograph,
+ * focusing on the face and removing surrounding background (beds, rooms, hands).
+ */
+export async function extractFaceFromSelfie(buffer: Buffer): Promise<Buffer> {
+  try {
+    const image = sharp(buffer, { failOnError: false } as any);
     const meta = await image.metadata();
     const w = meta.width || 800;
     const h = meta.height || 600;
 
-    // In passports & identity cards, the photo is standardly on the left 3% to 40%
-    const cropLeft = Math.max(0, Math.round(w * 0.03));
-    const cropTop = Math.max(0, Math.round(h * 0.18));
-    const cropWidth = Math.min(w - cropLeft, Math.round(w * 0.38));
-    const cropHeight = Math.min(h - cropTop, Math.round(h * 0.58));
+    const gridW = 128;
+    const gridH = Math.round((h / w) * gridW);
 
-    return await image
-      .extract({ left: cropLeft, top: cropTop, width: cropWidth, height: cropHeight })
+    const { data } = await sharp(buffer, { failOnError: false } as any)
+      .resize(gridW, gridH, { fit: 'fill' })
+      .toColorspace('srgb')
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    let totalSkin = 0;
+    let skinXSum = 0;
+    let minSkinX = gridW, maxSkinX = 0;
+    let minSkinY = gridH, maxSkinY = 0;
+    const rowSkinCounts = new Int32Array(gridH);
+
+    for (let y = 0; y < gridH; y++) {
+      for (let x = 0; x < gridW; x++) {
+        const idx = (y * gridW + x) * 3;
+        if (isSkinTone(data[idx], data[idx + 1], data[idx + 2])) {
+          totalSkin++;
+          skinXSum += x;
+          rowSkinCounts[y]++;
+          if (x < minSkinX) minSkinX = x;
+          if (x > maxSkinX) maxSkinX = x;
+          if (y < minSkinY) minSkinY = y;
+          if (y > maxSkinY) maxSkinY = y;
+        }
+      }
+    }
+
+    if (totalSkin === 0) return buffer;
+
+    // Find top of forehead (first row with significant skin)
+    let topY = minSkinY;
+    for (let y = 0; y < gridH; y++) {
+      if (rowSkinCounts[y] > gridW * 0.06) {
+        topY = y;
+        break;
+      }
+    }
+
+    const centerX = (skinXSum / totalSkin) / gridW * w;
+    const topPx = (topY / gridH) * h;
+    const faceW = Math.min(w * 0.90, Math.max(w * 0.40, ((maxSkinX - minSkinX) / gridW) * w * 1.15));
+    const faceH = Math.min(h * 0.95, faceW * 1.25);
+
+    let cropX = Math.round(centerX - faceW / 2);
+    let cropY = Math.round(Math.max(0, topPx - faceH * 0.12));
+    let cropWidth = Math.round(faceW);
+    let cropHeight = Math.round(faceH);
+
+    cropX = Math.max(0, Math.min(w - 10, cropX));
+    cropY = Math.max(0, Math.min(h - 10, cropY));
+    cropWidth = Math.min(w - cropX, Math.max(50, cropWidth));
+    cropHeight = Math.min(h - cropY, Math.max(50, cropHeight));
+
+    return await sharp(buffer, { failOnError: false } as any)
+      .extract({ left: cropX, top: cropY, width: cropWidth, height: cropHeight })
       .jpeg({ quality: 90 })
       .toBuffer();
-  } catch {
+  } catch (err: any) {
+    console.warn('[ImageAnalysis] Falling back to default selfie extract:', err.message);
     return buffer;
   }
 }
+
+
