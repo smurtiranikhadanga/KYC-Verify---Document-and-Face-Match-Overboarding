@@ -152,11 +152,13 @@ export async function createCase(req: AuthRequest, res: Response): Promise<void>
     await kycCase.save();
   }
 
+  const applicantEmail = req.applicant?.email || req.user?.email || (await Applicant.findById(applicantId))?.email;
   await createAuditEntry({
     actor: {
       id: applicantId,
       type: req.user ? 'user' : 'applicant',
       role: req.role,
+      email: applicantEmail,
     },
     action: 'CASE_CREATED',
     resource: { type: 'KycCase', id: caseId },
@@ -435,6 +437,20 @@ export async function uploadSelfie(req: AuthRequest, res: Response): Promise<voi
   });
   await kycCase.save();
 
+  await createAuditEntry({
+    actor: {
+      id: req.applicant?._id?.toString() || 'applicant',
+      type: 'applicant',
+      role: req.role || 'applicant',
+      email: req.applicant?.email,
+    },
+    action: 'SELFIE_UPLOADED',
+    resource: { type: 'KycCase', id },
+    outcome: 'SUCCESS',
+    ipHash: crypto.createHash('sha256').update(req.ip || '127.0.0.1').digest('hex'),
+    metadata: { selfieFileName: file.originalname, caseId: id },
+  });
+
   // FIX PIPE-04: Do NOT return hardcoded liveness score. Real check happens on submit.
   res.json({
     success: true,
@@ -552,6 +568,20 @@ export async function submitCase(req: AuthRequest, res: Response): Promise<void>
     frontArtifactId: frontArtifact._id.toString(),
     backArtifactId: backArtifact ? backArtifact._id.toString() : undefined,
     selfieArtifactId: selfieArtifact._id.toString(),
+  });
+
+  await createAuditEntry({
+    actor: {
+      id: req.applicant?._id?.toString() || req.user?._id?.toString() || 'applicant',
+      type: req.user ? 'user' : 'applicant',
+      role: req.role || 'applicant',
+      email: req.applicant?.email || req.user?.email || 'applicant',
+    },
+    action: 'CASE_SUBMITTED',
+    resource: { type: 'KycCase', id },
+    outcome: 'SUCCESS',
+    ipHash: crypto.createHash('sha256').update(req.ip || '127.0.0.1').digest('hex'),
+    metadata: { attemptNumber: submissionCount + 1, caseId: id },
   });
 
   res.status(202).json({

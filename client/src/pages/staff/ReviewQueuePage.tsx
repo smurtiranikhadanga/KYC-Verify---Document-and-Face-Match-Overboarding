@@ -115,17 +115,17 @@ export const ReviewQueuePage: React.FC = () => {
               : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
           }`}
         >
-          Active Queue ({queueMeta.pendingCount ?? cases.length})
+          All Submissions ({queueMeta.totalAllCases ?? cases.length})
         </button>
         <button
-          onClick={() => setStatusFilter('ALL')}
+          onClick={() => setStatusFilter('ACTIVE')}
           className={`px-3.5 py-1.5 rounded-lg font-semibold transition-all ${
-            statusFilter === 'ALL'
+            statusFilter === 'ACTIVE'
               ? 'bg-brand-600 text-white shadow-xs'
               : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
           }`}
         >
-          All Cases ({queueMeta.totalAllCases ?? cases.length})
+          Pending Review ({queueMeta.pendingCount ?? 0})
         </button>
         <button
           onClick={() => setStatusFilter('APPROVED')}
@@ -259,6 +259,7 @@ export const ReviewQueuePage: React.FC = () => {
                   <th className="px-5 py-3.5">Reason Flags</th>
                   <th className="px-5 py-3.5">Jurisdiction</th>
                   <th className="px-5 py-3.5">Doc Type</th>
+                  <th className="px-5 py-3.5">Submissions</th>
                   <th className="px-5 py-3.5">State</th>
                   <th className="px-5 py-3.5">Assigned Reviewer</th>
                   <th className="px-5 py-3.5 text-right">Actions</th>
@@ -312,6 +313,11 @@ export const ReviewQueuePage: React.FC = () => {
                       </td>
                       <td className="px-5 py-3.5 font-semibold text-slate-800">{c.jurisdiction}</td>
                       <td className="px-5 py-3.5 capitalize">{c.documentType?.replace('_', ' ')}</td>
+                      <td className="px-5 py-3.5">
+                        <span className="px-2 py-0.5 bg-slate-100 text-slate-800 rounded font-mono font-bold text-[11px] border border-slate-200">
+                          #{c.submissionCount || 1}
+                        </span>
+                      </td>
                       <td className="px-5 py-3.5">
                         <span
                           className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${

@@ -26,7 +26,7 @@ export const complianceService = {
     return res.data;
   },
 
-  async getAuditLogs(params?: { action?: string; actor?: string; resource?: string }) {
+  async getAuditLogs(params?: { action?: string; actor?: string; resource?: string; search?: string }) {
     const res = await api.get('/compliance/audit', { params });
     return res.data;
   },

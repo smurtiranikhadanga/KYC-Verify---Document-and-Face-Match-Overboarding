@@ -230,12 +230,21 @@ export async function getRetentionPolicies(_req: Request, res: Response): Promis
 }
 
 export async function getAuditLogs(req: Request, res: Response): Promise<void> {
-  const { action, actor, resource, limit = 50 } = req.query;
+  const { action, actor, resource, search, limit = 100 } = req.query;
   const query: any = {};
 
   if (action) query.action = action;
-  if (actor) query['actor.email'] = { $regex: actor, $options: 'i' };
   if (resource) query['resource.id'] = { $regex: resource, $options: 'i' };
+
+  const searchStr = (search || actor) as string;
+  if (searchStr) {
+    query.$or = [
+      { 'actor.email': { $regex: searchStr, $options: 'i' } },
+      { 'actor.id': { $regex: searchStr, $options: 'i' } },
+      { 'resource.id': { $regex: searchStr, $options: 'i' } },
+      { action: { $regex: searchStr, $options: 'i' } },
+    ];
+  }
 
   const logs = await AuditLog.find(query).sort({ timestamp: -1 }).limit(Number(limit));
 

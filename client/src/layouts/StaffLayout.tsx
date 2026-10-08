@@ -26,7 +26,7 @@ export const StaffLayout: React.FC = () => {
       try {
         const res = await api.get('/reviews/queue');
         if (res.data?.data) {
-          setPendingCount(res.data.data.length);
+          setPendingCount(res.data.meta?.totalAllCases ?? res.data.data.length);
         }
       } catch {
         // silently ignore

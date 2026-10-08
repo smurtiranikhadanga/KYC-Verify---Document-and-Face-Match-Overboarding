@@ -11,9 +11,9 @@ export async function getReviewQueue(req: AuthRequest, res: Response): Promise<v
 
   const query: any = {};
 
-  if (status && status !== 'ACTIVE') {
-    if (status === 'ALL') {
-      // No filter on state — returns all cases
+  if (status && status !== 'ALL') {
+    if (status === 'ACTIVE') {
+      query.state = { $in: ['MANUAL_REVIEW', 'QUEUED', 'PROCESSING', 'NEEDS_RESUBMISSION', 'PROCESSING_FAILED'] };
     } else if (status === 'APPROVED') {
       query.state = { $in: ['APPROVED', 'AUTO_APPROVED'] };
     } else if (status === 'REJECTED') {
@@ -21,10 +21,8 @@ export async function getReviewQueue(req: AuthRequest, res: Response): Promise<v
     } else {
       query.state = status;
     }
-  } else {
-    // Default active queue shows all cases requiring staff attention or currently in progress
-    query.state = { $in: ['MANUAL_REVIEW', 'QUEUED', 'PROCESSING', 'NEEDS_RESUBMISSION', 'PROCESSING_FAILED'] };
   }
+  // When status is empty or 'ALL', return all cases so newly submitted records immediately appear
 
   if (risk) {
     if (risk === 'high') query.riskScore = { $gte: 60 };
@@ -41,7 +39,7 @@ export async function getReviewQueue(req: AuthRequest, res: Response): Promise<v
 
   const [cases, totalMatching, totalAllCases, totalPending] = await Promise.all([
     KycCase.find(query)
-      .sort({ 'decision.priority': -1, createdAt: -1 })
+      .sort({ createdAt: -1, 'decision.priority': -1 })
       .populate('assignedTo', 'name email')
       .limit(100),
     KycCase.countDocuments(query),
@@ -63,6 +61,7 @@ export async function getReviewQueue(req: AuthRequest, res: Response): Promise<v
     state: c.state,
     assignedTo: (c.assignedTo as any)?.name || 'Unassigned',
     priority: c.decision?.priority || 50,
+    submissionCount: c.submissionCount || 1,
   }));
 
   res.json({

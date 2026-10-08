@@ -21,17 +21,23 @@ import { useAuth } from '../../context/AuthContext';
 export const StaffDashboardPage: React.FC = () => {
   const { role } = useAuth();
   const [stats, setStats] = useState<any>(null);
+  const [queueMeta, setQueueMeta] = useState<any>({});
   const [recentCases, setRecentCases] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function loadDashboard() {
       try {
-        const statsRes = await adminService.getStats();
-        if (statsRes.success) setStats(statsRes.data);
+        const [statsRes, queueRes] = await Promise.all([
+          adminService.getStats().catch(() => null),
+          reviewService.getQueue().catch(() => null),
+        ]);
 
-        const queueRes = await reviewService.getQueue({ status: 'MANUAL_REVIEW' });
-        if (queueRes.success) setRecentCases(queueRes.data.slice(0, 5));
+        if (statsRes && statsRes.success) setStats(statsRes.data);
+        if (queueRes && queueRes.success) {
+          setRecentCases(queueRes.data.slice(0, 5));
+          if (queueRes.meta) setQueueMeta(queueRes.meta);
+        }
       } catch (err) {
         console.error('Failed to load dashboard metrics:', err);
       } finally {
@@ -135,7 +141,7 @@ export const StaffDashboardPage: React.FC = () => {
             <span className="text-xs font-semibold">Total Submissions</span>
             <Activity className="w-4 h-4 text-brand-600" />
           </div>
-          <div className="text-2xl font-black text-slate-900">{stats?.totalCases ?? recentCases.length}</div>
+          <div className="text-2xl font-black text-slate-900">{stats?.totalCases ?? queueMeta.totalAllCases ?? recentCases.length}</div>
           <div className="text-[11px] text-emerald-600 font-medium flex items-center space-x-1">
             <TrendingUp className="w-3 h-3" />
             <span>Real-time counter</span>
@@ -156,7 +162,7 @@ export const StaffDashboardPage: React.FC = () => {
             <span className="text-xs font-semibold">Pending Review</span>
             <Clock className="w-4 h-4 text-amber-500" />
           </div>
-          <div className="text-2xl font-black text-slate-900">{stats?.pendingReviews ?? recentCases.length}</div>
+          <div className="text-2xl font-black text-slate-900">{stats?.pendingReviews ?? queueMeta.pendingCount ?? recentCases.length}</div>
           <div className="text-[11px] text-amber-600 font-medium">Active queue pressure</div>
         </div>
 
