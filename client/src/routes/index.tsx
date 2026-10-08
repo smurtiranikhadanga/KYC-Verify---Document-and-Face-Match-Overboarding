@@ -36,6 +36,8 @@ import { AuditPage } from '../pages/staff/AuditPage';
 
 import { useAuth } from '../context/AuthContext';
 
+const STAFF_ROLES = ['admin', 'reviewer', 'senior_reviewer', 'compliance_officer', 'ml_engineer', 'auditor'];
+
 // Protected Route Guard for Staff
 const ProtectedStaffRoute: React.FC<{ children: React.ReactNode; allowedRoles?: string[] }> = ({
   children,
@@ -51,7 +53,7 @@ const ProtectedStaffRoute: React.FC<{ children: React.ReactNode; allowedRoles?: 
     );
   }
 
-  if (!token || !user) {
+  if (!token || !user || role === 'applicant' || !STAFF_ROLES.includes(role || '')) {
     return <Navigate to="/staff/login" replace />;
   }
 

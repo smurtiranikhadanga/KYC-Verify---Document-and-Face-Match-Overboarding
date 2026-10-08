@@ -8,6 +8,6 @@ const router = Router();
 // FIX AUTH-03: Consent creation and withdrawal require authentication
 router.post('/', requireAuth, createConsent);
 router.delete('/:id', requireAuth, withdrawConsent);
-router.get('/', requireAuth, requireRole('compliance_officer', 'senior_reviewer', 'auditor', 'admin'), getConsents);
+router.get('/', requireAuth, requireRole('compliance_officer', 'senior_reviewer', 'reviewer', 'auditor', 'admin'), getConsents);
 
 export default router;

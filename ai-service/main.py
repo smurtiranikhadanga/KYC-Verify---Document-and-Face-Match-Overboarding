@@ -60,8 +60,8 @@ async def analyze_kyc(
 
         return {
             "modelVersions": {
-                "ocr": "easyocr-1.7.1",
-                "face": "deepface-0.0.84",
+                "ocr": "lightweight-ocr-1.0",
+                "face": "opencv-arcface-compact-1.0",
                 "pad": "heuristic-1.0",
                 "tamper": "rules-1.0"
             },

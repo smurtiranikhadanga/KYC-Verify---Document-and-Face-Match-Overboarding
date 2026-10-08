@@ -352,7 +352,14 @@ export const VerifyStatusPage: React.FC = () => {
                   'We were unable to verify your identity with the provided documentation. Please contact support or submit certified physical identification.'}
               </p>
             </div>
-            <div className="pt-3 flex justify-center gap-3">
+            <div className="pt-3 flex flex-wrap justify-center gap-3">
+              <button
+                onClick={handleResubmit}
+                className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold rounded-lg transition-colors inline-flex items-center space-x-1.5 shadow-xs"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Re-upload Documents</span>
+              </button>
               <Link
                 to="/contact"
                 className="px-5 py-2.5 bg-slate-900 text-white text-xs font-semibold rounded-lg hover:bg-slate-800 transition-colors inline-flex items-center space-x-1.5"

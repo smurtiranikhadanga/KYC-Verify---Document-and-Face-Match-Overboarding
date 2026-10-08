@@ -231,18 +231,62 @@ export const VerifyDocumentPage: React.FC = () => {
     ctx.font = 'bold 20px sans-serif';
     ctx.fillText('OFFICIAL IDENTITY DOCUMENT / PASSPORT', 25, 45);
 
-    ctx.fillStyle = '#cbd5e1';
+    // Photo background
+    ctx.fillStyle = '#e2e8f0';
     ctx.fillRect(35, 95, 140, 180);
     ctx.strokeStyle = '#94a3b8';
     ctx.strokeRect(35, 95, 140, 180);
 
-    ctx.fillStyle = '#e2e8f0';
+    // Torso / clothes
+    ctx.fillStyle = '#1e293b';
     ctx.beginPath();
-    ctx.arc(105, 155, 38, 0, Math.PI * 2);
+    ctx.arc(105, 270, 65, 0, Math.PI, true);
     ctx.fill();
+
+    // Neck
+    ctx.fillStyle = '#d79e6f';
+    ctx.fillRect(93, 195, 24, 30);
+
+    // Face with authentic skin tone
+    ctx.fillStyle = '#e5ab7c';
     ctx.beginPath();
-    ctx.arc(105, 250, 60, 0, Math.PI, true);
+    ctx.ellipse(105, 160, 36, 44, 0, 0, Math.PI * 2);
     ctx.fill();
+
+    // Hair
+    ctx.fillStyle = '#2d1f19';
+    ctx.beginPath();
+    ctx.arc(105, 145, 38, Math.PI, Math.PI * 2);
+    ctx.fill();
+
+    // Eyes
+    ctx.fillStyle = '#3e2723';
+    ctx.beginPath();
+    ctx.arc(93, 158, 4, 0, Math.PI * 2);
+    ctx.arc(117, 158, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Eyebrows
+    ctx.strokeStyle = '#2d1f19';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(88, 150); ctx.lineTo(98, 150);
+    ctx.moveTo(112, 150); ctx.lineTo(122, 150);
+    ctx.stroke();
+
+    // Nose
+    ctx.strokeStyle = '#c68a5c';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(105, 158); ctx.lineTo(103, 168); ctx.lineTo(107, 168);
+    ctx.stroke();
+
+    // Mouth
+    ctx.strokeStyle = '#b05d4b';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(105, 175, 10, 0.2, Math.PI - 0.2);
+    ctx.stroke();
 
     ctx.fillStyle = '#0f172a';
     ctx.font = 'bold 14px sans-serif';
@@ -334,9 +378,31 @@ export const VerifyDocumentPage: React.FC = () => {
         throw new Error('Could not establish verification case. Please try again.');
       }
 
-      const uploadRes = await caseService.uploadDocuments(activeCaseId, frontFile, backFile || undefined);
+      let uploadRes;
+      try {
+        uploadRes = await caseService.uploadDocuments(activeCaseId, frontFile, backFile || undefined);
+      } catch (uploadErr: any) {
+        // If the case is in an invalid or terminal state, auto-recover by creating a fresh case
+        if (uploadErr.response?.data?.error?.code === 'INVALID_STATE') {
+          const freshCaseRes = await caseService.createCase({
+            applicantId: effectiveApplicantId || 'applicant',
+            country,
+            documentType: docType,
+            jurisdiction: country,
+          });
+          if (freshCaseRes.success && freshCaseRes.data) {
+            activeCaseId = freshCaseRes.data.caseId;
+            updateState({ caseId: activeCaseId, applicantId: effectiveApplicantId });
+            uploadRes = await caseService.uploadDocuments(activeCaseId, frontFile, backFile || undefined);
+          } else {
+            throw uploadErr;
+          }
+        } else {
+          throw uploadErr;
+        }
+      }
 
-      if (uploadRes.success) {
+      if (uploadRes && uploadRes.success) {
         updateState({
           country,
           documentType: docType,

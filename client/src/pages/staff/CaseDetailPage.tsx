@@ -154,8 +154,8 @@ export const CaseDetailPage: React.FC = () => {
   const liveness = caseData.liveness || {};
   const tamper = doc.tamper || {};
   const quality = doc.quality || {};
-  const isSenior = role === 'senior_reviewer';
-  const canMakeDecision = role === 'reviewer' || role === 'senior_reviewer';
+  const isSenior = role === 'senior_reviewer' || role === 'admin';
+  const canMakeDecision = role === 'reviewer' || role === 'senior_reviewer' || role === 'admin';
 
   return (
     <div className="space-y-4">
@@ -343,7 +343,7 @@ export const CaseDetailPage: React.FC = () => {
               <span className="px-2 py-0.5 bg-amber-100 text-amber-800 text-[10px] font-bold rounded">
                 PII UNMASKED (AUDITED)
               </span>
-            ) : isSenior ? (
+            ) : isSenior || role === 'compliance_officer' ? (
               <button
                 onClick={() => setShowRevealModal(true)}
                 className="px-2.5 py-1 bg-brand-50 hover:bg-brand-100 text-brand-700 font-semibold text-[11px] rounded transition-colors flex items-center space-x-1"

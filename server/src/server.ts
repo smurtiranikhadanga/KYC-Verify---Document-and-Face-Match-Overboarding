@@ -72,23 +72,23 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
-// 3. Rate limiting (stricter for auth endpoints)
+// 3. Rate limiting (accommodates real-time polling in staff portal)
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 300,
+  max: ENV.NODE_ENV === 'production' ? 5000 : 50000,
   standardHeaders: true,
   legacyHeaders: false,
-  skip: () => process.env.NODE_ENV === 'test',
+  skip: () => process.env.NODE_ENV === 'test' || ENV.NODE_ENV !== 'production',
   message: { success: false, error: { code: 'TOO_MANY_REQUESTS', message: 'Rate limit exceeded' } },
 });
 
 // FIX AUTH-01: Strict rate limit on OTP request endpoint
 const otpLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 5, // Max 5 OTP requests per 15 minutes per IP
+  max: ENV.NODE_ENV === 'production' ? 10 : 150,
   standardHeaders: true,
   legacyHeaders: false,
-  skip: () => process.env.NODE_ENV === 'test',
+  skip: () => process.env.NODE_ENV === 'test' || ENV.NODE_ENV !== 'production',
   message: { success: false, error: { code: 'TOO_MANY_REQUESTS', message: 'Too many OTP requests. Try again in 15 minutes.' } },
 });
 
@@ -104,6 +104,9 @@ app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 // selfies with NO authentication. Replace with an authenticated file-serving
 // endpoint that checks ownership before returning file bytes.
 // ─────────────────────────────────────────────────────────────────────────────
+// Serve mock demonstration uploads statically so seeded review cases can display images in <img> tags
+app.use('/uploads/mock', express.static(path.join(ENV.UPLOAD_DIR, 'mock')));
+
 app.get('/uploads/*', requireAuth as any, async (req: any, res: Response) => {
   try {
     const relativePath = req.params[0];
@@ -223,7 +226,19 @@ async function startServer() {
   }
 }
 
-if (process.env.NODE_ENV !== 'test') {
+// Support Vercel Serverless Function execution
+app.use(async (_req: Request, _res: Response, next: NextFunction) => {
+  if (process.env.VERCEL) {
+    try {
+      await connectDB();
+    } catch (e: any) {
+      console.error('[DB] Serverless connect error:', e.message);
+    }
+  }
+  next();
+});
+
+if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
   startServer();
 }
 

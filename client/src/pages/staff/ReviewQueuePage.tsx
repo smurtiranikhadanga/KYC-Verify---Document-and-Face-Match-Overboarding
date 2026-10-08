@@ -18,6 +18,7 @@ export const ReviewQueuePage: React.FC = () => {
   const { user, role } = useAuth();
   const canReview = role === 'reviewer' || role === 'senior_reviewer';
   const [cases, setCases] = useState<any[]>([]);
+  const [queueMeta, setQueueMeta] = useState<any>({});
   const [loading, setLoading] = useState(true);
 
   // Filters
@@ -39,6 +40,7 @@ export const ReviewQueuePage: React.FC = () => {
       });
       if (res.success) {
         setCases(res.data);
+        if (res.meta) setQueueMeta(res.meta);
       }
     } catch (err) {
       console.error('Failed to load review queue:', err);
@@ -51,9 +53,9 @@ export const ReviewQueuePage: React.FC = () => {
     fetchQueue(false);
     const interval = setInterval(() => {
       fetchQueue(true);
-    }, 4000);
+    }, 3000);
     return () => clearInterval(interval);
-  }, [statusFilter, riskFilter, jurisdictionFilter, docTypeFilter]);
+  }, [statusFilter, riskFilter, jurisdictionFilter, docTypeFilter, searchTerm]);
 
   const handleClaim = async (caseId: string) => {
     try {
@@ -70,18 +72,100 @@ export const ReviewQueuePage: React.FC = () => {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Verification Review Queue</h2>
+          <div className="flex items-center space-x-2.5">
+            <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Verification Review Queue</h2>
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200 animate-pulse">
+              ● Live Sync (3s)
+            </span>
+          </div>
           <p className="text-xs text-slate-500 mt-1">
             Prioritized cases sorted by SLA deadline and decision risk priority. Zero applicant PII exposed in queue listings.
           </p>
         </div>
 
+        <div className="flex items-center space-x-2.5">
+          <div className="flex items-center space-x-2 text-xs font-semibold">
+            <span className="px-3 py-1.5 bg-brand-50 text-brand-700 rounded-lg border border-brand-200 shadow-2xs">
+              Showing: <span className="font-mono font-bold">{cases.length}</span> records
+            </span>
+            {queueMeta.totalAllCases !== undefined && (
+              <span className="px-3 py-1.5 bg-slate-100 text-slate-700 rounded-lg border border-slate-200">
+                Total in System: <span className="font-mono font-bold">{queueMeta.totalAllCases}</span>
+              </span>
+            )}
+          </div>
+
+          <button
+            onClick={() => fetchQueue()}
+            className="px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg transition-colors inline-flex items-center space-x-1.5 shadow-xs"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Refresh</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Quick Navigation Tabs */}
+      <div className="flex items-center space-x-2 border-b border-slate-200 pb-3 overflow-x-auto text-xs">
         <button
-          onClick={() => fetchQueue()}
-          className="px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg transition-colors inline-flex items-center space-x-1.5 shadow-xs"
+          onClick={() => setStatusFilter('')}
+          className={`px-3.5 py-1.5 rounded-lg font-semibold transition-all ${
+            statusFilter === ''
+              ? 'bg-brand-600 text-white shadow-xs'
+              : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+          }`}
         >
-          <RefreshCw className="w-3.5 h-3.5" />
-          <span>Refresh Queue</span>
+          Active Queue ({queueMeta.pendingCount ?? cases.length})
+        </button>
+        <button
+          onClick={() => setStatusFilter('ALL')}
+          className={`px-3.5 py-1.5 rounded-lg font-semibold transition-all ${
+            statusFilter === 'ALL'
+              ? 'bg-brand-600 text-white shadow-xs'
+              : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+          }`}
+        >
+          All Cases ({queueMeta.totalAllCases ?? cases.length})
+        </button>
+        <button
+          onClick={() => setStatusFilter('APPROVED')}
+          className={`px-3.5 py-1.5 rounded-lg font-semibold transition-all ${
+            statusFilter === 'APPROVED'
+              ? 'bg-emerald-600 text-white shadow-xs'
+              : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+          }`}
+        >
+          Approved
+        </button>
+        <button
+          onClick={() => setStatusFilter('MANUAL_REVIEW')}
+          className={`px-3.5 py-1.5 rounded-lg font-semibold transition-all ${
+            statusFilter === 'MANUAL_REVIEW'
+              ? 'bg-amber-600 text-white shadow-xs'
+              : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+          }`}
+        >
+          Manual Review
+        </button>
+        <button
+          onClick={() => setStatusFilter('NEEDS_RESUBMISSION')}
+          className={`px-3.5 py-1.5 rounded-lg font-semibold transition-all ${
+            statusFilter === 'NEEDS_RESUBMISSION'
+              ? 'bg-purple-600 text-white shadow-xs'
+              : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+          }`}
+        >
+          Needs Resubmit
+        </button>
+        <button
+          onClick={() => setStatusFilter('REJECTED')}
+          className={`px-3.5 py-1.5 rounded-lg font-semibold transition-all ${
+            statusFilter === 'REJECTED'
+              ? 'bg-rose-600 text-white shadow-xs'
+              : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+          }`}
+        >
+          Rejected
         </button>
       </div>
 
@@ -94,7 +178,6 @@ export const ReviewQueuePage: React.FC = () => {
             placeholder="Search by Case ID..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && fetchQueue()}
             className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
           />
         </div>
@@ -104,13 +187,14 @@ export const ReviewQueuePage: React.FC = () => {
           onChange={(e) => setStatusFilter(e.target.value)}
           className="px-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-700 font-medium"
         >
-          <option value="">Status: All Active</option>
+          <option value="">Status: Active Pending Queue</option>
+          <option value="ALL">Status: All Cases (Total History)</option>
           <option value="MANUAL_REVIEW">Manual Review</option>
           <option value="NEEDS_RESUBMISSION">Needs Resubmission</option>
           <option value="PROCESSING">Processing</option>
           <option value="QUEUED">Queued</option>
-          <option value="APPROVED">Approved</option>
-          <option value="REJECTED">Rejected</option>
+          <option value="APPROVED">Approved (Manual & Auto)</option>
+          <option value="REJECTED">Rejected (Manual & Auto)</option>
         </select>
 
         <select

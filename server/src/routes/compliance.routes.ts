@@ -33,7 +33,7 @@ router.get(
 router.post(
   '/dsar/:id/execute',
   requireAuth,
-  requireRole('compliance_officer'),
+  requireRole('compliance_officer', 'admin'),
   executeDsar
 );
 

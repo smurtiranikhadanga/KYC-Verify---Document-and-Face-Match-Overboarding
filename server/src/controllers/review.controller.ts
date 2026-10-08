@@ -11,11 +11,19 @@ export async function getReviewQueue(req: AuthRequest, res: Response): Promise<v
 
   const query: any = {};
 
-  if (status) {
-    query.state = status;
+  if (status && status !== 'ACTIVE') {
+    if (status === 'ALL') {
+      // No filter on state — returns all cases
+    } else if (status === 'APPROVED') {
+      query.state = { $in: ['APPROVED', 'AUTO_APPROVED'] };
+    } else if (status === 'REJECTED') {
+      query.state = { $in: ['REJECTED', 'AUTO_REJECTED'] };
+    } else {
+      query.state = status;
+    }
   } else {
-    // Default queue shows MANUAL_REVIEW, QUEUED, PROCESSING
-    query.state = { $in: ['MANUAL_REVIEW', 'QUEUED', 'PROCESSING', 'NEEDS_RESUBMISSION'] };
+    // Default active queue shows all cases requiring staff attention or currently in progress
+    query.state = { $in: ['MANUAL_REVIEW', 'QUEUED', 'PROCESSING', 'NEEDS_RESUBMISSION', 'PROCESSING_FAILED'] };
   }
 
   if (risk) {
@@ -31,10 +39,15 @@ export async function getReviewQueue(req: AuthRequest, res: Response): Promise<v
     query.caseId = { $regex: search, $options: 'i' };
   }
 
-  const cases = await KycCase.find(query)
-    .sort({ 'decision.priority': -1, createdAt: 1 })
-    .populate('assignedTo', 'name email')
-    .limit(100);
+  const [cases, totalMatching, totalAllCases, totalPending] = await Promise.all([
+    KycCase.find(query)
+      .sort({ 'decision.priority': -1, createdAt: -1 })
+      .populate('assignedTo', 'name email')
+      .limit(100),
+    KycCase.countDocuments(query),
+    KycCase.countDocuments(),
+    KycCase.countDocuments({ state: { $in: ['MANUAL_REVIEW', 'QUEUED', 'PROCESSING'] } }),
+  ]);
 
   // Return queue items (no sensitive PII in queue lists as per Dashboard.md)
   const queueItems = cases.map((c) => ({
@@ -55,6 +68,12 @@ export async function getReviewQueue(req: AuthRequest, res: Response): Promise<v
   res.json({
     success: true,
     data: queueItems,
+    meta: {
+      total: totalMatching,
+      totalAllCases,
+      pendingCount: totalPending,
+      count: queueItems.length,
+    },
   });
 }
 
@@ -121,9 +140,9 @@ export async function decideCase(req: AuthRequest, res: Response): Promise<void>
   else if (action === 'ESCALATE') finalState = 'MANUAL_REVIEW';
 
   // Check Four-Eyes override rule: if case was AUTO_REJECTED or has high risk score (>=70)
-  // and non-senior reviewer tries to approve it, require senior reviewer approval
+  // and non-senior reviewer tries to approve it, require senior reviewer or admin approval
   if (action === 'APPROVE' && (kycCase.riskScore >= 70 || kycCase.state === 'AUTO_REJECTED')) {
-    if (req.role !== 'senior_reviewer') {
+    if (req.role !== 'senior_reviewer' && req.role !== 'admin') {
       res.status(403).json({
         success: false,
         error: {
@@ -188,8 +207,8 @@ export async function decideCase(req: AuthRequest, res: Response): Promise<void>
 export async function revealPii(req: AuthRequest, res: Response): Promise<void> {
   const { caseId } = req.params;
 
-  // Authorization check: only senior_reviewer and compliance_officer can reveal
-  if (req.role !== 'senior_reviewer' && req.role !== 'compliance_officer') {
+  // Authorization check: only senior_reviewer, compliance_officer, and admin can reveal
+  if (req.role !== 'senior_reviewer' && req.role !== 'compliance_officer' && req.role !== 'admin') {
     res.status(403).json({
       success: false,
       error: { code: 'FORBIDDEN', message: 'Only Senior Reviewers or Compliance Officers can reveal masked PII.' },
@@ -237,7 +256,7 @@ export async function revealPii(req: AuthRequest, res: Response): Promise<void> 
 export async function overrideDecision(req: AuthRequest, res: Response): Promise<void> {
   const { caseId } = req.params;
 
-  if (req.role !== 'senior_reviewer') {
+  if (req.role !== 'senior_reviewer' && req.role !== 'admin') {
     res.status(403).json({
       success: false,
       error: { code: 'FORBIDDEN', message: 'Four-eyes decision override requires Senior Reviewer privileges.' },

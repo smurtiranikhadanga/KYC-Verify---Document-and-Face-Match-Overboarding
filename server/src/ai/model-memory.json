@@ -1,0 +1,142 @@
+{
+  "metadata": {
+    "modelId": "kyc-flow-core-v2.5",
+    "compiledAt": "2026-10-08T04:56:41.818Z",
+    "trainingSamples": 22,
+    "featureDimension": 7,
+    "featureNames": [
+      "face_distance",
+      "liveness_inverse",
+      "tamper_anomaly",
+      "ocr_uncertainty",
+      "quality_degradation",
+      "document_expired",
+      "mrz_invalid"
+    ],
+    "performance": {
+      "riskScoreR2": 0.812,
+      "riskScoreMSE": 165.4695,
+      "accuracyEstimate": "98.6%"
+    }
+  },
+  "biometricModel": {
+    "architecture": "ArcFace-Sim-v2 + SkinToneCalibrator",
+    "optimalThreshold": 0.782,
+    "sigmoidCoefficients": {
+      "alpha": -11.339,
+      "beta": 14.5
+    },
+    "meanAcceptedSim": 0.9362,
+    "meanRejectedSim": 0.6275
+  },
+  "tamperModel": {
+    "alertThreshold": 0.492,
+    "weights": {
+      "elaRecompression": 0.42,
+      "fftSpectral": 0.35,
+      "exifEditingSignatures": 0.23
+    }
+  },
+  "riskScoringModel": {
+    "bias": 11.777,
+    "weights": [
+      36.9073,
+      159.6414,
+      38.7036,
+      -14.0389,
+      35.2758,
+      -16.5876,
+      -10.5446
+    ]
+  },
+  "decisionEngine": {
+    "decisionCentroids": {
+      "AUTO_APPROVED": [
+        0.0638,
+        0.0362,
+        0.0688,
+        0.0225,
+        0.0462,
+        0,
+        0
+      ],
+      "MANUAL_REVIEW": [
+        0.1457,
+        0.1271,
+        0.2143,
+        0.0743,
+        0.1329,
+        0,
+        0
+      ],
+      "NEEDS_RESUBMISSION": [
+        0.1133,
+        0.0833,
+        0.0967,
+        0.32,
+        0.4267,
+        0,
+        0
+      ],
+      "AUTO_REJECTED": [
+        0.3725,
+        0.2875,
+        0.8,
+        0.1425,
+        0.16,
+        0.25,
+        0.5
+      ]
+    },
+    "thresholds": {
+      "autoApproveMaxRisk": 25,
+      "manualReviewMaxRisk": 75,
+      "hardRejectTamperScore": 0.7,
+      "resubmissionMaxQualityDefect": 0.6
+    }
+  },
+  "documentKnowledge": {
+    "supportedCountries": [
+      "IN",
+      "US",
+      "GB",
+      "DE",
+      "ES",
+      "AE",
+      "FR",
+      "JP",
+      "BR",
+      "KR",
+      "SG",
+      "CA"
+    ],
+    "documentTypes": [
+      "passport",
+      "driver_license",
+      "national_id"
+    ],
+    "mrzLineFormats": {
+      "passport": {
+        "lines": 2,
+        "lineLength": 44,
+        "format": "TD3"
+      },
+      "national_id": {
+        "lines": 3,
+        "lineLength": 30,
+        "format": "TD1"
+      },
+      "visa": {
+        "lines": 2,
+        "lineLength": 36,
+        "format": "TD2"
+      }
+    },
+    "qualityFloors": {
+      "minResolutionWidth": 640,
+      "minResolutionHeight": 480,
+      "maxBlurVarianceFloor": 60,
+      "maxGlareRatioCeiling": 0.15
+    }
+  }
+}

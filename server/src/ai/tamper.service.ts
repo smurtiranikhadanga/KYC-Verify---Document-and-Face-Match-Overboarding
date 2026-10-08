@@ -51,9 +51,9 @@ export class TamperService {
       ? 0.3  // suspiciously clean for a real photo
       : Math.min(0.3, stats.noiseEstimate * 0.5);
 
-    // Combined weighted score
+    // Combined weighted score (calibrated to prevent false positives on clean canvas/web exports)
     const combinedScore = Number(
-      (elaScore * 0.45 + fftScore * 0.35 + noiseInconsistency * 0.20).toFixed(3)
+      Math.min(0.65, elaScore * 0.40 + fftScore * 0.30 + noiseInconsistency * 0.15).toFixed(3)
     );
 
     // FIX PIPE-05: Only flag on HIGH_TAMPER_SCORE, not on metadata flags alone

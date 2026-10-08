@@ -13,11 +13,29 @@ import {
   UserCheck,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { api } from '../services/api';
 
 export const StaffLayout: React.FC = () => {
   const { user, role, logout, login } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+  const [pendingCount, setPendingCount] = React.useState<number | null>(null);
+
+  React.useEffect(() => {
+    async function fetchCount() {
+      try {
+        const res = await api.get('/reviews/queue');
+        if (res.data?.data) {
+          setPendingCount(res.data.data.length);
+        }
+      } catch {
+        // silently ignore
+      }
+    }
+    fetchCount();
+    const interval = setInterval(fetchCount, 4000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleLogout = () => {
     logout();
@@ -150,7 +168,14 @@ export const StaffLayout: React.FC = () => {
                   <Icon className={`w-4 h-4 ${active ? 'text-white' : 'text-slate-400'}`} />
                   <span>{item.label}</span>
                 </div>
-                {active && <ChevronRight className="w-4 h-4 opacity-70" />}
+                <div className="flex items-center space-x-2">
+                  {item.path === '/staff/review-queue' && pendingCount !== null && (
+                    <span className="px-2 py-0.5 text-[10px] font-bold bg-amber-500/20 text-amber-400 rounded-full border border-amber-500/30">
+                      {pendingCount}
+                    </span>
+                  )}
+                  {active && <ChevronRight className="w-4 h-4 opacity-70" />}
+                </div>
               </Link>
             );
           })}

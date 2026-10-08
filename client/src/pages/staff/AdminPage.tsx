@@ -10,8 +10,12 @@ import {
   Power,
 } from 'lucide-react';
 import { adminService } from '../../services/admin.service';
+import { useAuth } from '../../context/AuthContext';
 
 export const AdminPage: React.FC = () => {
+  const { role } = useAuth();
+  const isAdmin = role === 'admin';
+  const canEditPolicy = role === 'admin' || role === 'compliance_officer';
   const [activeTab, setActiveTab] = useState<'USERS' | 'POLICY'>('USERS');
 
   // Users State
@@ -171,18 +175,24 @@ export const AdminPage: React.FC = () => {
                     <td className="px-5 py-3.5 font-bold text-slate-900">{u.name}</td>
                     <td className="px-5 py-3.5 font-mono text-slate-500">{u.email}</td>
                     <td className="px-5 py-3.5">
-                      <select
-                        value={u.role}
-                        onChange={(e) => handleRoleChange(u._id, e.target.value)}
-                        className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-slate-300 bg-white"
-                      >
-                        <option value="reviewer">Reviewer</option>
-                        <option value="senior_reviewer">Senior Reviewer</option>
-                        <option value="compliance_officer">Compliance Officer</option>
-                        <option value="admin">Administrator</option>
-                        <option value="ml_engineer">ML Engineer</option>
-                        <option value="auditor">Auditor</option>
-                      </select>
+                      {isAdmin ? (
+                        <select
+                          value={u.role}
+                          onChange={(e) => handleRoleChange(u._id, e.target.value)}
+                          className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-slate-300 bg-white"
+                        >
+                          <option value="reviewer">Reviewer</option>
+                          <option value="senior_reviewer">Senior Reviewer</option>
+                          <option value="compliance_officer">Compliance Officer</option>
+                          <option value="admin">Administrator</option>
+                          <option value="ml_engineer">ML Engineer</option>
+                          <option value="auditor">Auditor</option>
+                        </select>
+                      ) : (
+                        <span className="px-2.5 py-1 text-xs font-semibold uppercase text-slate-700 bg-slate-100 rounded-md">
+                          {u.role?.replace('_', ' ')}
+                        </span>
+                      )}
                     </td>
                     <td className="px-5 py-3.5 text-slate-600">{u.department || 'Operations'}</td>
                     <td className="px-5 py-3.5">
@@ -195,16 +205,20 @@ export const AdminPage: React.FC = () => {
                       </span>
                     </td>
                     <td className="px-5 py-3.5 text-right">
-                      <button
-                        onClick={() => handleStatusToggle(u._id, u.isActive)}
-                        className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-colors ${
-                          u.isActive
-                            ? 'bg-slate-100 hover:bg-red-50 text-red-600'
-                            : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700'
-                        }`}
-                      >
-                        {u.isActive ? 'Deactivate' : 'Activate'}
-                      </button>
+                      {isAdmin ? (
+                        <button
+                          onClick={() => handleStatusToggle(u._id, u.isActive)}
+                          className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-colors ${
+                            u.isActive
+                              ? 'bg-slate-100 hover:bg-red-50 text-red-600'
+                              : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700'
+                          }`}
+                        >
+                          {u.isActive ? 'Deactivate' : 'Activate'}
+                        </button>
+                      ) : (
+                        <span className="text-[11px] text-slate-400 italic">Read-Only</span>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -352,14 +366,20 @@ export const AdminPage: React.FC = () => {
               </label>
             </div>
 
-            <button
-              type="submit"
-              disabled={savingPolicy}
-              className="w-full py-2.5 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white font-semibold text-xs rounded-lg transition-colors flex items-center justify-center space-x-2 shadow-xs"
-            >
-              <Save className="w-3.5 h-3.5" />
-              <span>{savingPolicy ? 'Saving & Publishing Version...' : 'Save Policy Changes'}</span>
-            </button>
+            {canEditPolicy ? (
+              <button
+                type="submit"
+                disabled={savingPolicy}
+                className="w-full py-2.5 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white font-semibold text-xs rounded-lg transition-colors flex items-center justify-center space-x-2 shadow-xs"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>{savingPolicy ? 'Saving & Publishing Version...' : 'Save Policy Changes'}</span>
+              </button>
+            ) : (
+              <div className="text-center p-3 text-xs text-slate-500 italic bg-slate-50 border border-slate-200 rounded-lg">
+                Threshold policies are published and managed by Administrator or Compliance Officers (Read-only for Auditor)
+              </div>
+            )}
           </form>
         </div>
       )}

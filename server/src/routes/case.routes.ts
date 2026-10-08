@@ -27,21 +27,23 @@ const upload = multer({
 
 const router = Router();
 
-// FIX AUTH-03: All mutation routes require authentication
-// Case creation requires auth so applicantId comes from token, not body
-router.post('/', requireAuth, requireRole('applicant'), createCase);
+const CASE_PERMITTED_ROLES = ['applicant', 'reviewer', 'senior_reviewer', 'admin', 'compliance_officer', 'ml_engineer', 'auditor'] as const;
 
-// FIX AUTH-03: Case reads require auth; ownership is checked inside controller
+// All mutation routes require authentication
+// Case creation requires auth so applicantId comes from token, not body
+router.post('/', requireAuth, requireRole(...CASE_PERMITTED_ROLES), createCase);
+
+// Case reads require auth; ownership is checked inside controller
 router.get('/:id', requireAuth, getCaseById);
 
-// FIX AUTH-03: Status requires auth to prevent threshold-probing
-router.get('/:id/status', requireAuth, requireRole('applicant'), getCaseStatus);
+// Status requires auth
+router.get('/:id/status', requireAuth, requireRole(...CASE_PERMITTED_ROLES), getCaseStatus);
 
-// FIX AUTH-03: Upload and submit require auth
+// Upload and submit require auth
 router.post(
   '/:id/documents',
   requireAuth,
-  requireRole('applicant'),
+  requireRole(...CASE_PERMITTED_ROLES),
   upload.fields([
     { name: 'front', maxCount: 1 },
     { name: 'back', maxCount: 1 },
@@ -49,10 +51,10 @@ router.post(
   uploadDocuments
 );
 
-router.post('/:id/selfie', requireAuth, requireRole('applicant'), upload.single('selfie'), uploadSelfie);
+router.post('/:id/selfie', requireAuth, requireRole(...CASE_PERMITTED_ROLES), upload.single('selfie'), uploadSelfie);
 
-// FIX PIPE-11: submit and resubmit require auth + state checks (in controller)
-router.post('/:id/submit', requireAuth, requireRole('applicant'), submitCase);
-router.post('/:id/resubmit', requireAuth, requireRole('applicant'), resubmitCase);
+// submit and resubmit require auth + state checks (in controller)
+router.post('/:id/submit', requireAuth, requireRole(...CASE_PERMITTED_ROLES), submitCase);
+router.post('/:id/resubmit', requireAuth, requireRole(...CASE_PERMITTED_ROLES), resubmitCase);
 
 export default router;

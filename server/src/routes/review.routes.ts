@@ -22,7 +22,7 @@ router.get(
 router.post(
   '/:caseId/claim',
   requireAuth,
-  requireRole('reviewer', 'senior_reviewer'),
+  requireRole('reviewer', 'senior_reviewer', 'admin'),
   claimCase
 );
 
@@ -30,44 +30,44 @@ router.post(
 router.post(
   '/:caseId/decide',
   requireAuth,
-  requireRole('reviewer', 'senior_reviewer'),
+  requireRole('reviewer', 'senior_reviewer', 'admin'),
   decideCase
 );
 
 // Individual shorthand endpoints
-router.post('/:caseId/approve', requireAuth, requireRole('reviewer', 'senior_reviewer'), (req, res) => {
+router.post('/:caseId/approve', requireAuth, requireRole('reviewer', 'senior_reviewer', 'admin'), (req, res) => {
   req.body.action = 'APPROVE';
   decideCase(req, res);
 });
 
-router.post('/:caseId/reject', requireAuth, requireRole('reviewer', 'senior_reviewer'), (req, res) => {
+router.post('/:caseId/reject', requireAuth, requireRole('reviewer', 'senior_reviewer', 'admin'), (req, res) => {
   req.body.action = 'REJECT';
   decideCase(req, res);
 });
 
-router.post('/:caseId/resubmit', requireAuth, requireRole('reviewer', 'senior_reviewer'), (req, res) => {
+router.post('/:caseId/resubmit', requireAuth, requireRole('reviewer', 'senior_reviewer', 'admin'), (req, res) => {
   req.body.action = 'RESUBMIT';
   decideCase(req, res);
 });
 
-router.post('/:caseId/escalate', requireAuth, requireRole('reviewer', 'senior_reviewer'), (req, res) => {
+router.post('/:caseId/escalate', requireAuth, requireRole('reviewer', 'senior_reviewer', 'admin'), (req, res) => {
   req.body.action = 'ESCALATE';
   decideCase(req, res);
 });
 
-// Reveal PII: requires senior_reviewer or compliance_officer with justification
+// Reveal PII: requires senior_reviewer, compliance_officer, or admin with justification
 router.post(
   '/:caseId/reveal-pii',
   requireAuth,
-  requireRole('senior_reviewer', 'compliance_officer'),
+  requireRole('senior_reviewer', 'compliance_officer', 'admin'),
   revealPii
 );
 
-// Four-eyes override: requires senior_reviewer
+// Four-eyes override: requires senior_reviewer or admin
 router.post(
   '/:caseId/override',
   requireAuth,
-  requireRole('senior_reviewer'),
+  requireRole('senior_reviewer', 'admin'),
   overrideDecision
 );
 

@@ -14,8 +14,11 @@ import {
   FileCheck,
 } from 'lucide-react';
 import { complianceService } from '../../services/compliance.service';
+import { useAuth } from '../../context/AuthContext';
 
 export const CompliancePage: React.FC = () => {
+  const { role } = useAuth();
+  const canExecuteDsar = role === 'compliance_officer' || role === 'admin';
   const [activeTab, setActiveTab] = useState<'CONSENTS' | 'DSAR' | 'RETENTION'>('CONSENTS');
 
   // Consents State
@@ -268,13 +271,19 @@ export const CompliancePage: React.FC = () => {
                       <td className="px-5 py-3.5 text-slate-500 max-w-xs truncate">{req.reason || 'None specified'}</td>
                       <td className="px-5 py-3.5 text-right">
                         {req.status !== 'COMPLETED' ? (
-                          <button
-                            onClick={() => handleExecuteDsar(req.requestId)}
-                            disabled={executingId === req.requestId}
-                            className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white font-semibold text-[11px] rounded transition-colors shadow-xs"
-                          >
-                            {executingId === req.requestId ? 'Purging...' : 'Execute Erasure'}
-                          </button>
+                          canExecuteDsar ? (
+                            <button
+                              onClick={() => handleExecuteDsar(req.requestId)}
+                              disabled={executingId === req.requestId}
+                              className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white font-semibold text-[11px] rounded transition-colors shadow-xs"
+                            >
+                              {executingId === req.requestId ? 'Purging...' : 'Execute Erasure'}
+                            </button>
+                          ) : (
+                            <span className="text-[10px] text-amber-600 bg-amber-50 px-2 py-0.5 rounded font-medium">
+                              Pending Officer Action
+                            </span>
+                          )
                         ) : req.completionCertificate ? (
                           <button
                             onClick={() => setSelectedCertificate(req.completionCertificate)}

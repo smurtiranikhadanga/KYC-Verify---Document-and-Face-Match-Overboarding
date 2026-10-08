@@ -20,7 +20,7 @@ const ArtifactSchema = new Schema<IArtifact>(
     kind: {
       type: String,
       required: true,
-      enum: ['id_front', 'id_back', 'selfie', 'liveness_video', 'evidence'],
+      enum: ['id_front', 'id_back', 'selfie', 'liveness_video', 'evidence', 'id_face'],
     },
     storageKey: { type: String, required: true },
     fileName: { type: String, required: true },

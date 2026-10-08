@@ -24,8 +24,11 @@ import {
   Legend,
 } from 'recharts';
 import { mlopsService } from '../../services/mlops.service';
+import { useAuth } from '../../context/AuthContext';
 
 export const MLOpsPage: React.FC = () => {
+  const { role } = useAuth();
+  const canTriggerRetraining = role === 'ml_engineer' || role === 'admin';
   const [models, setModels] = useState<any[]>([]);
   const [metrics, setMetrics] = useState<any>(null);
   const [drift, setDrift] = useState<any>(null);
@@ -80,14 +83,20 @@ export const MLOpsPage: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={handleTriggerRetraining}
-          disabled={retrainingTriggered}
-          className="px-4 py-2 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-xs font-semibold rounded-lg flex items-center space-x-2 shadow-xs transition-all active:scale-[0.98]"
-        >
-          <Play className="w-3.5 h-3.5 fill-current" />
-          <span>{retrainingTriggered ? 'Triggering DAG...' : 'Trigger Golden Retraining DAG'}</span>
-        </button>
+        {canTriggerRetraining ? (
+          <button
+            onClick={handleTriggerRetraining}
+            disabled={retrainingTriggered}
+            className="px-4 py-2 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-xs font-semibold rounded-lg flex items-center space-x-2 shadow-xs transition-all active:scale-[0.98]"
+          >
+            <Play className="w-3.5 h-3.5 fill-current" />
+            <span>{retrainingTriggered ? 'Triggering DAG...' : 'Trigger Golden Retraining DAG'}</span>
+          </button>
+        ) : (
+          <span className="text-[11px] text-slate-500 bg-slate-100 px-3 py-1.5 rounded-lg font-medium">
+            Telemetry Monitoring Only (Read-Only)
+          </span>
+        )}
       </div>
 
       {/* Model Registry Cards */}

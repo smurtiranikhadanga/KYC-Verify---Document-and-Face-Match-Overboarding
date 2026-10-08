@@ -30,7 +30,7 @@ export type DocumentType = 'passport' | 'national_id' | 'driver_license';
 
 export type ConsentType = 'biometric' | 'general' | 'marketing';
 
-export type ArtifactKind = 'id_front' | 'id_back' | 'selfie' | 'liveness_video' | 'evidence';
+export type ArtifactKind = 'id_front' | 'id_back' | 'selfie' | 'liveness_video' | 'evidence' | 'id_face';
 
 export type DSARType = 'ACCESS' | 'DELETION' | 'CORRECTION';
 export type DSARStatus = 'SUBMITTED' | 'VERIFIED' | 'IN_REVIEW' | 'COMPLETED' | 'REJECTED';

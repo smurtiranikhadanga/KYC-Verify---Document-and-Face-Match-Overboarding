@@ -11,6 +11,7 @@ import { DSARRequest } from '../models/dsar.model.js';
 import { Policy } from '../models/policy.model.js';
 import { ModelRun } from '../models/model-run.model.js';
 import { AnalyticsDaily } from '../models/analytics-daily.model.js';
+import { Artifact } from '../models/artifact.model.js';
 
 export async function seedDatabase(): Promise<void> {
   console.log('[Seed] Starting database seeding for KYC-Flow...');
@@ -28,6 +29,7 @@ export async function seedDatabase(): Promise<void> {
     Policy.deleteMany({}),
     ModelRun.deleteMany({}),
     AnalyticsDaily.deleteMany({}),
+    Artifact.deleteMany({}),
   ]);
 
   const defaultPassword = await bcrypt.hash('Password123!', 10);
@@ -475,7 +477,7 @@ export async function seedDatabase(): Promise<void> {
         type: t.docType,
         issuingCountry: t.country,
         artifactIds: [],
-        frontImageUrl: `/uploads/mock/doc_${t.docType}_${t.country}.jpg`,
+        frontImageUrl: `/uploads/mock/case_${caseId.toLowerCase()}_doc_front.jpg`,
         backImageUrl: `/uploads/mock/doc_back.jpg`,
         ocr: {
           engine: 'PaddleOCR / PP-StructureV3',
@@ -519,8 +521,8 @@ export async function seedDatabase(): Promise<void> {
         threshold: 0.80,
         match: t.similarity >= 0.80,
         confidence: Number((t.similarity * 0.98).toFixed(3)),
-        selfieUrl: `/uploads/mock/selfie_${i % 6 + 1}.jpg`,
-        croppedFaceUrl: `/uploads/mock/doc_${t.docType}_${t.country}.jpg`,
+        selfieUrl: `/uploads/mock/case_${caseId.toLowerCase()}_selfie.jpg`,
+        croppedFaceUrl: `/uploads/mock/case_${caseId.toLowerCase()}_face_crop.jpg`,
       },
       liveness: {
         score: t.liveness,
@@ -568,7 +570,51 @@ export async function seedDatabase(): Promise<void> {
       at: new Date(createdAt.getTime() + 60000),
     });
 
+    // Create corresponding artifact records for case documents
+    const prefix = `case_${caseId.toLowerCase()}`;
+    const artFront = await Artifact.create({
+      caseId: kCase.caseId,
+      kind: 'id_front',
+      storageKey: `mock/${prefix}_doc_front.jpg`,
+      fileName: `${prefix}_doc_front.jpg`,
+      mimeType: 'image/jpeg',
+      sizeBytes: 60000,
+      sha256: crypto.createHash('sha256').update(`${caseId}_front`).digest('hex'),
+      createdAt,
+    });
+    const artBack = await Artifact.create({
+      caseId: kCase.caseId,
+      kind: 'id_back',
+      storageKey: `mock/doc_back.jpg`,
+      fileName: `doc_back.jpg`,
+      mimeType: 'image/jpeg',
+      sizeBytes: 27000,
+      sha256: crypto.createHash('sha256').update(`${caseId}_back`).digest('hex'),
+      createdAt,
+    });
+    const artSelfie = await Artifact.create({
+      caseId: kCase.caseId,
+      kind: 'selfie',
+      storageKey: `mock/${prefix}_selfie.jpg`,
+      fileName: `${prefix}_selfie.jpg`,
+      mimeType: 'image/jpeg',
+      sizeBytes: 8000,
+      sha256: crypto.createHash('sha256').update(`${caseId}_selfie`).digest('hex'),
+      createdAt,
+    });
+    const artFace = await Artifact.create({
+      caseId: kCase.caseId,
+      kind: 'id_face',
+      storageKey: `mock/${prefix}_face_crop.jpg`,
+      fileName: `${prefix}_face_crop.jpg`,
+      mimeType: 'image/jpeg',
+      sizeBytes: 7000,
+      sha256: crypto.createHash('sha256').update(`${caseId}_face`).digest('hex'),
+      createdAt,
+    });
+
     kCase.consentIds = [consent._id as any];
+    kCase.document.artifactIds = [artFront._id as any, artBack._id as any, artSelfie._id as any, artFace._id as any];
     await kCase.save();
 
     // If MANUAL_REVIEW, create a ReviewTask

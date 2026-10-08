@@ -317,17 +317,39 @@ export async function processCaseJob(data: ProcessCaseJobData): Promise<void> {
   } catch (error: any) {
     console.error(`[JobQueue] Case ${caseId} processing failed:`, error.message);
 
-    // FIX PIPE-15: Re-fetch to avoid overwriting a protected state
+    // FIX: Route pipeline failures to MANUAL_REVIEW so human reviewers can inspect and resolve
     const freshCase = await KycCase.findOne({ caseId });
     if (freshCase && !PROTECTED_STATES.has(freshCase.state as string)) {
-      freshCase.state = 'PROCESSING_FAILED';
+      freshCase.state = 'MANUAL_REVIEW';
+      freshCase.riskScore = 85;
+      freshCase.riskFlags = ['PIPELINE_ERROR', 'IMAGE_PROCESSING_FAILED'];
       freshCase.stateHistory.push({
-        state: 'PROCESSING_FAILED',
+        state: 'MANUAL_REVIEW',
         at: new Date(),
         by: 'system_pipeline',
-        notes: `Processing error: ${error.message}`,
+        notes: `Pipeline error routed to reviewer: ${error.message}`,
       });
+      freshCase.decision = {
+        outcome: 'MANUAL_REVIEW',
+        reasonCodes: ['PIPELINE_ERROR', 'IMAGE_PROCESSING_FAILED'],
+        policyVersion: 1,
+        decidedBy: 'AI_FALLBACK_HANDLER',
+        decidedAt: new Date(),
+        priority: 90,
+      };
       await freshCase.save();
+
+      await ReviewTask.findOneAndUpdate(
+        { caseId },
+        {
+          caseId,
+          status: 'PENDING',
+          priority: 90,
+          reasonCodes: ['PIPELINE_ERROR', 'IMAGE_PROCESSING_FAILED'],
+          slaDueAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
+        },
+        { upsert: true, new: true }
+      );
     }
 
     await createAuditEntry({
@@ -335,7 +357,7 @@ export async function processCaseJob(data: ProcessCaseJobData): Promise<void> {
       action: 'CASE_PROCESSING_FAILED',
       resource: { type: 'KycCase', id: caseId },
       outcome: 'FAILURE',
-      metadata: { error: error.message },
+      metadata: { error: error.message, fallbackState: 'MANUAL_REVIEW' },
     });
   }
 }

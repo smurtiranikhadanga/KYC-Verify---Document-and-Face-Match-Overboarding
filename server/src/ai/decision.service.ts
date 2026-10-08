@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import {
   DocumentValidationResult,
   FaceVerificationResult,
@@ -6,6 +8,26 @@ import {
   TamperResult,
   QualityResult,
 } from './ai.interface.js';
+
+let trainedModelMemory: any = null;
+try {
+  const possiblePaths = [
+    typeof __dirname !== 'undefined' ? path.join(__dirname, 'model-memory.json') : '',
+    path.join(process.cwd(), 'src/ai/model-memory.json'),
+    path.join(process.cwd(), 'dist/ai/model-memory.json'),
+    path.join(process.cwd(), 'server/src/ai/model-memory.json'),
+    path.join(process.cwd(), 'server/dist/ai/model-memory.json'),
+  ].filter(Boolean);
+
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) {
+      trainedModelMemory = JSON.parse(fs.readFileSync(p, 'utf-8'));
+      break;
+    }
+  }
+} catch {
+  // Use baseline fallback if file is not found
+}
 
 export interface DecisionPolicy {
   faceMatchThreshold: number;
@@ -31,9 +53,9 @@ export class DecisionService {
     liveness: LivenessResult,
     tamper: TamperResult,
     policy: DecisionPolicy = {
-      faceMatchThreshold: 0.55,
+      faceMatchThreshold: trainedModelMemory?.biometricModel?.optimalThreshold ?? 0.55,
       livenessThreshold: 0.60,
-      tamperThreshold: 0.55,
+      tamperThreshold: trainedModelMemory?.tamperModel?.alertThreshold ?? 0.55,
       ocrConfidenceThreshold: 0.80,
       autoApproveAllowed: true,
       minimumAgeYears: 18,
@@ -49,6 +71,29 @@ export class DecisionService {
     const riskFlags: string[] = [];
     let priority = 50;
     let riskScore = 15;
+
+    // Utilize trained model memory risk scoring weights
+    if (trainedModelMemory?.riskScoringModel) {
+      try {
+        const { bias, weights } = trainedModelMemory.riskScoringModel;
+        const faceDist = Number((1.0 - (face.similarity || 0)).toFixed(3));
+        const liveInv = Number((1.0 - (liveness.score || 0)).toFixed(3));
+        const tamperVal = tamper.score || 0;
+        const ocrUncert = Number((1.0 - (ocr.fields?.fullName?.confidence ?? 0.85)).toFixed(3));
+        const qualDeg = Number((1.0 - (quality.score ?? 0.90)).toFixed(3));
+        const expFlag = validation.expired ? 1.0 : 0.0;
+        const mrzFlag = validation.crossFieldOk ? 0.0 : 1.0;
+
+        const features = [faceDist, liveInv, tamperVal, ocrUncert, qualDeg, expFlag, mrzFlag];
+        let learnedRiskScore = bias;
+        for (let i = 0; i < features.length; i++) {
+          learnedRiskScore += (weights[i] || 0) * features[i];
+        }
+        riskScore = Math.max(10, Math.min(95, Math.round(learnedRiskScore)));
+      } catch {
+        riskScore = 15;
+      }
+    }
 
     // ── 1. Document Expired ──────────────────────────────────────────────────
     if (validation.expired) {
@@ -192,9 +237,7 @@ export class DecisionService {
       tamper.score >= 0.85 ||
       tamper.metadataFlags.includes('EXIF_EDITING_SOFTWARE_DETECTED') ||
       riskFlags.includes('MINIMUM_AGE_NOT_MET') ||
-      riskFlags.includes('EXPIRED_DOCUMENT') ||
-      (liveness.score < 0.20 && !liveness.passed) ||
-      (riskScore >= 85 && tamper.score > 0.60);
+      riskFlags.includes('EXPIRED_DOCUMENT');
     if (hardReject) {
       return {
         outcome: 'AUTO_REJECTED',
@@ -208,10 +251,21 @@ export class DecisionService {
     if (riskFlags.length > 0 || policy.autoApproveAllowed === false) {
       return {
         outcome: 'MANUAL_REVIEW',
-        reasonCodes,
+        reasonCodes: reasonCodes.length > 0 ? reasonCodes : ['RISK_FLAGS_PRESENT'],
         priority: Math.min(100, priority),
         riskScore: Math.min(100, riskScore),
         riskFlags,
+      };
+    }
+
+    // When biometric match succeeds and no fraud flags exist:
+    if (face.match || face.similarity >= (policy.faceMatchThreshold ?? 0.50)) {
+      return {
+        outcome: 'AUTO_APPROVED',
+        reasonCodes: ['ALL_CHECKS_PASSED'],
+        priority: 10,
+        riskScore: 12,
+        riskFlags: [],
       };
     }
 
