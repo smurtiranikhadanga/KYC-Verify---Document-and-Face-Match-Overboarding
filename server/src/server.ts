@@ -27,9 +27,13 @@ import { KycCase } from './models/case.model.js';
 
 const app = express();
 
-// Ensure upload directory exists
-if (!fs.existsSync(ENV.UPLOAD_DIR)) {
-  fs.mkdirSync(ENV.UPLOAD_DIR, { recursive: true });
+// Ensure upload directory exists safely (read-only filesystem on Vercel)
+try {
+  if (!fs.existsSync(ENV.UPLOAD_DIR)) {
+    fs.mkdirSync(ENV.UPLOAD_DIR, { recursive: true });
+  }
+} catch (e: any) {
+  console.warn('[Storage] Warning creating upload dir:', e.message);
 }
 
 // 1. Security middleware
@@ -243,3 +247,9 @@ if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
 }
 
 export default app;
+
+// CommonJS compatibility for Vercel Serverless Function loader
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = app;
+  (module.exports as any).default = app;
+}
