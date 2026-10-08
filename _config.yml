@@ -1,0 +1,10 @@
+# GitHub Pages Configuration
+theme: []
+include:
+  - ".nojekyll"
+exclude:
+  - node_modules
+  - server
+  - ai-service
+  - uploads
+  - "*.md"

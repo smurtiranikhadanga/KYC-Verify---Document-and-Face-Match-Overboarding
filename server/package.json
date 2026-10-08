@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
+    "vercel-build": "tsc",
     "start": "node dist/server.js",
     "seed": "tsx src/jobs/seed.ts",
     "train:ai": "tsx src/ai/train-model.ts",
